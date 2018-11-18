@@ -1,27 +1,43 @@
 {
 	"compilerOptions": {
+		"noEmit": true,
 		"module": "amd",
-		"moduleResolution": "node",
+		"moduleResolution": "classic",
 		"noImplicitAny": false,
 		"removeComments": false,
 		"preserveConstEnums": true,
-		"target": "es6",
-		"sourceMap": true,
+		"target": "es5",
+		"sourceMap": false,
 		"experimentalDecorators": true,
 		"declaration": true,
 		"noImplicitReturns": true,
-		"outDir": "dist",
-		"typeRoots": [
-			"typings",
-			"node_modules/@types"
-		],
-		"exclude": [
-			"node_modules",
-			"typings",
-			"src",
-			"src/vs/code/*",
-			"src/vs/editor/*",
-			"src/vs/platform/*",
-			"src/vs/workbench/*"
-		]
-	}
+		"baseUrl": ".",
+		"types": []
+	},
+	"include": [
+		"typings/require.d.ts",
+		"typings/thenable.d.ts",
+		"typings/es6-promise.d.ts",
+		"typings/lib.array-ext.d.ts",
+		"typings/lib.ie11_safe_es6.d.ts",
+		"vs/base/common/*"
+	],
+	"exclude": [
+		"node_modules/*",
+		"vs/code/**",
+		"vs/editor/**",
+		"vs/workbench/**",
+		"./src/vs/code/**",
+		"./src/vs/editor/**",
+		"./src/vs/workbench/**",
+		"../src/vs/code/**",
+		"../src/vs/editor/**",
+		"../src/vs/workbench/**",
+		"src/vs/code/**",
+		"src/vs/editor/**",
+		"src/vs/workbench/**",
+		"**/vs/code/**",
+		"**/vs/editor/**",
+		"**/vs/workbench/**"
+	]
+}

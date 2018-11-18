@@ -3,6 +3,7 @@ var nodeExternals = require('webpack-node-externals');
 var webpack = require('webpack');
 var CopyWebpackPlugin = require('copy-webpack-plugin');
 var path = require('path');
+const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
 
 var glob_entries1 = function (globPath) {
@@ -12,14 +13,14 @@ var glob_entries1 = function (globPath) {
 	for (var i = 0; i < files.length; i++) {
 		var entry = files[i];
 		var pathObj = path.parse(entry);
-		entries[path.join(pathObj.dir.replace(new RegExp('^\.\/out\/', ''), ''), pathObj.name)] = entry;
+		entries[path.join(pathObj.dir.replace(new RegExp('^\.\/src\/', ''), ''), pathObj.name)] = entry;
 	}
 	console.log(entries);
 	return entries;
 };
 
 var webpack_opts = {
-	entry: glob_entries1("./out/vs/base/[n|c]*/**/*.js"),
+	entry: glob_entries1("./src/vs/base/[n|c]*/**/*[!\.d].ts"),
 	mode: 'none',
 	target: 'node',
 	output: {
@@ -33,22 +34,12 @@ var webpack_opts = {
 		modules: [
 			'node_modules',
 			'out',
+		],
+		plugins: [
+			new TsconfigPathsPlugin({ configFile: path.resolve(__dirname, 'tsconfig.json') }),
 		]
 	},
 	plugins: [
-		new webpack.LoaderOptionsPlugin({
-			options: {
-				test: /\.ts$/,
-				ts: {
-					compiler: 'typescript',
-					configFileName: 'tsconfig.json'
-				},
-				tslint: {
-					emitErrors: true,
-					failOnHint: true
-				}
-			}
-		}),
 		// copy .d.ts to dest location
 		new CopyWebpackPlugin([
 			{
@@ -69,23 +60,25 @@ var webpack_opts = {
 		rules: [{
 			test: /\.ts$/,
 			exclude: /node_modules/,
-			use: [{
-				// vscode-nls-dev loader:
-				// * rewrite nls-calls
-				loader: 'vscode-nls-dev/lib/webpack-loader',
-				// options: {
-				// 	base: path.join(extConfig.context, 'src')
-				// }
-			}, {
-				// configure TypeScript loader:
-				// * enable sources maps for end-to-end source maps
-				loader: 'ts-loader',
-				options: {
-					compilerOptions: {
-						"sourceMap": true,
+			use: [
+				{
+					// configure TypeScript loader:
+					// * enable sources maps for end-to-end source maps
+					loader: 'ts-loader',
+					options: {
+						compilerOptions: {
+							"sourceMap": true,
+							"outDir": "../vs",
+							"declaration": true,
+							"declarationDir": "../vs",
+							"paths": {
+								"vs/*": [
+									"./vs/*"
+								]
+							}
+						},
 					}
-				}
-			}]
+				}]
 		},
 		{
 			test: /\.json?$/,
@@ -103,7 +96,7 @@ var webpack_opts = {
 	]
 
 	// "vscode-extension-telemetry": 'commonjs vscode-extension-telemetry', // commonly used
-// },
+	// },
 };
 
 module.exports = webpack_opts;
