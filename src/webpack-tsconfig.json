@@ -1,8 +1,7 @@
 {
 	"compilerOptions": {
-		"noEmit": true,
 		"module": "amd",
-		"moduleResolution": "classic",
+		"moduleResolution": "node",
 		"noImplicitAny": false,
 		"removeComments": false,
 		"preserveConstEnums": true,
@@ -13,9 +12,18 @@
 		"noImplicitReturns": true,
 		"declarationDir": "../vs",
 		"baseUrl": ".",
-		"types": []
+		"outDir": "../vs",
+		"types": [
+			"keytar",
+			"minimist",
+			"mocha",
+			"semver",
+			"sinon",
+			"winreg"
+		]
 	},
 	"include": [
+		"./typings",
 		"typings/require.d.ts",
 		"typings/thenable.d.ts",
 		"typings/es6-promise.d.ts",
@@ -24,6 +32,6 @@
 		"vs/base/common/*"
 	],
 	"exclude": [
-		"node_modules/*"
+		"node_modules"
 	]
 }
