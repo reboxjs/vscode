@@ -1,0 +1,27 @@
+{
+	"compilerOptions": {
+		"module": "amd",
+		"moduleResolution": "node",
+		"noImplicitAny": false,
+		"removeComments": false,
+		"preserveConstEnums": true,
+		"target": "es6",
+		"sourceMap": true,
+		"experimentalDecorators": true,
+		"declaration": true,
+		"noImplicitReturns": true,
+		"outDir": "dist",
+		"typeRoots": [
+			"typings",
+			"node_modules/@types"
+		],
+		"exclude": [
+			"node_modules",
+			"typings",
+			"src",
+			"src/vs/code/*",
+			"src/vs/editor/*",
+			"src/vs/platform/*",
+			"src/vs/workbench/*"
+		]
+	}
