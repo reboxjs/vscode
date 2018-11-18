@@ -5,9 +5,10 @@ var CopyWebpackPlugin = require('copy-webpack-plugin');
 var path = require('path');
 const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
+const dest_path = 'out/base-node';
 
 var glob_entries1 = function (globPath) {
-	var files = glob.sync(globPath);
+	var files = glob.sync(globPath, {ignore: './src/**/*.d.ts' });
 	var entries = {};
 
 	for (var i = 0; i < files.length; i++) {
@@ -20,13 +21,13 @@ var glob_entries1 = function (globPath) {
 };
 
 var webpack_opts = {
-	entry: glob_entries1("./src/vs/base/[n|c]*/**/*[!\.d].ts"),
+	entry: glob_entries1("./src/vs/base/[n|c]*/**/*.[t|j]s"),
 	mode: 'none',
 	target: 'node',
 	output: {
 		filename: '[name].js',
-		path: path.resolve(__dirname, 'dist-vs-base-node'),
-		library: '@vscode/vs-base-node',
+		path: path.resolve(__dirname, dest_path),
+		library: '@vscode/base-node',
 		libraryTarget: "commonjs2"
 	},
 	resolve: {
@@ -43,17 +44,31 @@ var webpack_opts = {
 		// copy .d.ts to dest location
 		new CopyWebpackPlugin([
 			{
-				context: './dist/src',
+				context: './src',
 				from: {
 					glob: 'vs/base/[n|c]*/**/*.d.ts',
 					dot: false
 				},
-				to: path.resolve(__dirname, 'dist-vs-base-node')
+				to: path.resolve(__dirname, dest_path)
 			},
 			{
 				from: './config/packages/vsBaseNode-package.json',
-				to: path.join(path.resolve(__dirname, 'dist-vs-base-node'), 'package.json')
-			}
+				to: path.join(path.resolve(__dirname, dest_path), 'package.json')
+			},
+			{
+				context: './src',
+				from: './typings',
+				to: path.join(path.resolve(__dirname, dest_path), 'typings')
+			},
+			{
+				from: './config/packages/vsBaseNode-tsconfig.json',
+				to: path.join(path.resolve(__dirname, dest_path), 'tsconfig.json')
+			},
+			{
+				context: './src',
+				from: './tsconfig.base.json',
+				to: path.join(path.resolve(__dirname, dest_path), 'tsconfig.base.json')
+			},
 		])
 	],
 	module: {
@@ -66,16 +81,12 @@ var webpack_opts = {
 					// * enable sources maps for end-to-end source maps
 					loader: 'ts-loader',
 					options: {
+						configFile: 'webpack-tsconfig.json',
 						compilerOptions: {
 							"sourceMap": true,
 							"outDir": "../vs",
 							"declaration": true,
-							"declarationDir": "../vs",
-							"paths": {
-								"vs/*": [
-									"./vs/*"
-								]
-							}
+							"declarationDir": "../vs/base"
 						},
 					}
 				}]
