@@ -7,28 +7,40 @@ const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
 const dest_path = 'out/base-node';
 
-var glob_entries1 = function (globPath) {
-	var files = glob.sync(globPath, {ignore: './src/**/*.d.ts' });
-	var entries = {};
+
+const search_path = "./src/vs/base/[n|c]*/**/*.[t|j]s";
+var glob_entries = function (globPath) {
+	var files = glob.sync(globPath, { ignore: './src/**/*.d.ts' });
+	var entries = { 'vs/nls': './src/vs/nls.mock' };
 
 	for (var i = 0; i < files.length; i++) {
 		var entry = files[i];
 		var pathObj = path.parse(entry);
 		entries[path.join(pathObj.dir.replace(new RegExp('^\.\/src\/', ''), ''), pathObj.name)] = entry;
 	}
-	console.log(entries);
 	return entries;
 };
 
+const keys = Object.keys(glob_entries(search_path));
+var external_entries = () => (context, request, callback) => {
+	if (keys.includes(request)) {
+		const relativePath = `./${path.relative(context, path.join(process.cwd(), 'src', request))}`;
+		console.log('path is included', relativePath);
+		// mark this module to relative and as external
+		return callback(null, 'commonjs' + " " + relativePath);
+	}
+	callback();
+};
+
 var webpack_opts = {
-	entry: glob_entries1("./src/vs/base/[n|c]*/**/*.[t|j]s"),
+	entry: glob_entries(search_path),
 	mode: 'none',
 	target: 'node',
 	output: {
 		filename: '[name].js',
 		path: path.resolve(__dirname, dest_path),
 		library: '@vscode/base-node',
-		libraryTarget: "commonjs2"
+		libraryTarget: "commonjs"
 	},
 	resolve: {
 		extensions: ['.ts', '.js'],
@@ -84,9 +96,9 @@ var webpack_opts = {
 						configFile: 'webpack-tsconfig.json',
 						compilerOptions: {
 							"sourceMap": true,
-							"outDir": "../vs",
+							// "outDir": "../vs",
 							"declaration": true,
-							"declarationDir": "../vs/base"
+							// "declarationDir": "../vs/base"
 						},
 					}
 				}]
@@ -103,7 +115,8 @@ var webpack_opts = {
 	},
 	externals: [
 		{ 'vscode': 'commonjs vscode' }, // ignored because it doesn't exist
-		nodeExternals()
+		nodeExternals(),
+		external_entries(),
 	]
 
 	// "vscode-extension-telemetry": 'commonjs vscode-extension-telemetry', // commonly used
