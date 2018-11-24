@@ -39,7 +39,6 @@ var webpack_opts = {
 	output: {
 		filename: '[name].js',
 		path: path.resolve(__dirname, dest_path),
-		library: '@vscode/base-node',
 		libraryTarget: "commonjs"
 	},
 	resolve: {
