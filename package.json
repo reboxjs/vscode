@@ -19,6 +19,7 @@
     "gulp": "gulp --max_old_space_size=4095",
     "7z": "7z",
     "vsBaseNodeBuild": "UV_THREADPOOL_SIZE=100 node --max_old_space_size=4096 node_modules/webpack/bin/webpack.js --display-chunks --optimize-min-chunk-size 10000 --optimize-max-chunks 10 --display-reasons --progress --color --config config/webpack.config.vsBaseNode.js",
+    "vsBaseIpcBuild": "UV_THREADPOOL_SIZE=100 node --max_old_space_size=4096 node_modules/webpack/bin/webpack.js --display-chunks --optimize-min-chunk-size 10000 --optimize-max-chunks 10 --display-reasons --progress --color --config config/webpack.config.vsBasePartsIpc.js",
     "update-grammars": "node build/npm/update-all-grammars.js",
     "update-localization-extension": "node build/npm/update-localization-extension.js",
     "smoketest": "cd test/smoke && node test/index.js",
