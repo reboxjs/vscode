@@ -1,7 +1,7 @@
 {
 	"name": "@vscode/base-node",
 	"private": false,
-	"version": "1.29.1-2",
+	"version": "1.29.1-4",
 	"publishConfig": {
 		"access": "public"
 	},

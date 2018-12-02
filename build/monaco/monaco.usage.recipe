@@ -14,6 +14,7 @@ import { SyncDescriptor0, SyncDescriptor1, SyncDescriptor2, SyncDescriptor3, Syn
 import { PolyfillPromise } from './vs/base/common/winjs.polyfill.promise';
 import { DiffNavigator } from './vs/editor/browser/widget/diffNavigator';
 import { TextModel } from './vs/editor/common/model/textModel';
+import { MirrorTextModel } from './vs/editor/common/model/mirrorTextModel';
 import * as editorAPI from './vs/editor/editor.api';
 
 (function () {

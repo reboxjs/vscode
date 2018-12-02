@@ -7,7 +7,7 @@ const TsconfigPathsPlugin = require('tsconfig-paths-webpack-plugin');
 
 const dest_path = 'out/base-node';
 
-
+const search_path_ipc = "./src/vs/base/parts/ipc/[n|c]*/**/*.[t|j]s";
 const search_path = "./src/vs/base/[n|c]*/**/*.[t|j]s";
 var glob_entries = function (globPath) {
 	var files = glob.sync(globPath, { ignore: './src/**/*.d.ts' });
@@ -21,7 +21,7 @@ var glob_entries = function (globPath) {
 	return entries;
 };
 
-const keys = Object.keys(glob_entries(search_path));
+const keys = Object.keys(Object.assign(glob_entries(search_path), glob_entries(search_path_ipc)));
 var external_entries = () => (context, request, callback) => {
 	if (keys.includes(request)) {
 		const relativePath = `./${path.relative(context, path.join(process.cwd(), 'src', request))}`;
@@ -33,7 +33,7 @@ var external_entries = () => (context, request, callback) => {
 };
 
 var webpack_opts = {
-	entry: glob_entries(search_path),
+	entry: Object.assign(glob_entries(search_path), glob_entries(search_path_ipc)),
 	mode: 'none',
 	target: 'node',
 	output: {
