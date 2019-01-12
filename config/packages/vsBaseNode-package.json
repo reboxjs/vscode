@@ -11,5 +11,8 @@
 		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"author": "VM (http://vm.com)",
-	"license": "ISC"
+	"license": "ISC",
+	"dependencies": {
+		"jschardet": "1.6.0"
+	}
 }

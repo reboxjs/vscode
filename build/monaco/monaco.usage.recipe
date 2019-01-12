@@ -15,6 +15,8 @@ import { PolyfillPromise } from './vs/base/common/winjs.polyfill.promise';
 import { DiffNavigator } from './vs/editor/browser/widget/diffNavigator';
 import { TextModel } from './vs/editor/common/model/textModel';
 import { MirrorTextModel } from './vs/editor/common/model/mirrorTextModel';
+import { ProgressLocation, LongRunningOperation, Progress, emptyProgress, emptyProgressRunner, IProgressOptions, IProgressStep } from './vs/platform/progress/common/progress';
+// import { IResourceEditorReplacement, ACTIVE_GROUP, SIDE_GROUP, IOpenEditorOverrideHandler, IOpenEditorOverride, IEditorService } from './vs/workbench/services/editor/common/editorService';
 import * as editorAPI from './vs/editor/editor.api';
 
 (function () {
@@ -28,6 +30,8 @@ import * as editorAPI from './vs/editor/editor.api';
 	a = (<IEnvironmentService>b).userHome; // IUserHomeProvider
 	a = (<DiffNavigator>b).previous; // IDiffNavigator
 	a = (<TextModel>b).createSnapshot; // TextModel
+	a = (<Progress<any>>b).value; // ProgressLocation
+	a = (<LongRunningOperation>b).start; // IOperation
 	a = (<ServiceIdentifier<any>>b).type;
 	a = (<IHighlight>b).start;
 	a = (<IHighlight>b).end;
