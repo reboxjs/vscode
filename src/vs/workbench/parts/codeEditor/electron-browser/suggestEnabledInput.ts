@@ -7,7 +7,7 @@ import 'vs/css!./media/suggestEnabledInput';
 import { $, Dimension, addClass, append, removeClass } from 'vs/base/browser/dom';
 import { Widget } from 'vs/base/browser/ui/widget';
 import { Color } from 'vs/base/common/color';
-import { Emitter, Event, chain } from 'vs/base/common/event';
+import { Emitter, Event } from 'vs/base/common/event';
 import { KeyCode } from 'vs/base/common/keyCodes';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { mixin } from 'vs/base/common/objects';
@@ -147,7 +147,7 @@ export class SuggestEnabledInput extends Widget implements IThemable {
 			removeClass(this.stylingContainer, 'synthetic-focus');
 		})));
 
-		const onKeyDownMonaco = chain(this.inputWidget.onKeyDown);
+		const onKeyDownMonaco = Event.chain(this.inputWidget.onKeyDown);
 		onKeyDownMonaco.filter(e => e.keyCode === KeyCode.Enter).on(e => { e.preventDefault(); this._onEnter.fire(); }, this, this.disposables);
 		onKeyDownMonaco.filter(e => e.keyCode === KeyCode.DownArrow && (isMacintosh ? e.metaKey : e.ctrlKey)).on(() => this._onShouldFocusResults.fire(), this, this.disposables);
 
@@ -156,7 +156,7 @@ export class SuggestEnabledInput extends Widget implements IThemable {
 			let content = this.getValue();
 			this.placeholderText.style.visibility = content ? 'hidden' : 'visible';
 			if (preexistingContent.trim() === content.trim()) { return; }
-			this._onInputDidChange.fire();
+			this._onInputDidChange.fire(undefined);
 			preexistingContent = content;
 		}));
 
@@ -249,7 +249,7 @@ export class SuggestEnabledInput extends Widget implements IThemable {
 registerThemingParticipant((theme, collector) => {
 	let selectionColor = theme.getColor(selectionBackground);
 	if (selectionColor) {
-		selectionColor = selectionColor.transparent(.4);
+		selectionColor = selectionColor.transparent(0.4);
 	} else {
 		selectionColor = theme.getColor(editorSelectionBackground);
 	}
@@ -261,7 +261,7 @@ registerThemingParticipant((theme, collector) => {
 	// Override inactive selection bg
 	const inputBackgroundColor = theme.getColor(inputBackground);
 	if (inputBackground) {
-		collector.addRule(`.suggest-input-container .monaco-editor .selected-text { background-color: ${inputBackgroundColor.transparent(.4)}; }`);
+		collector.addRule(`.suggest-input-container .monaco-editor .selected-text { background-color: ${inputBackgroundColor.transparent(0.4)}; }`);
 	}
 
 	// Override selected fg
@@ -281,7 +281,7 @@ function getSuggestEnabledInputOptions(ariaLabel?: string): IEditorOptions {
 		roundedSelection: false,
 		renderIndentGuides: false,
 		cursorWidth: 1,
-		fontFamily: ' -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "HelveticaNeue-Light", "Ubuntu", "Droid Sans", sans-serif',
+		fontFamily: ' -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif',
 		ariaLabel: ariaLabel || '',
 
 		snippetSuggestions: 'none',

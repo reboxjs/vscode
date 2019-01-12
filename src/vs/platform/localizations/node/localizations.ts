@@ -9,7 +9,7 @@ import { IExtensionManagementService, ILocalExtension, IExtensionIdentifier } fr
 import { Disposable } from 'vs/base/common/lifecycle';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { Queue } from 'vs/base/common/async';
-import { areSameExtensions, getGalleryExtensionIdFromLocal, getIdFromLocalExtensionId } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
+import { areSameExtensions, getIdFromLocalExtensionId } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
 import { ILogService } from 'vs/platform/log/common/log';
 import { isValidLocalization, ILocalizationsService, LanguageType } from 'vs/platform/localizations/common/localizations';
 import product from 'vs/platform/node/product';
@@ -42,9 +42,9 @@ export class LocalizationsService extends Disposable implements ILocalizationsSe
 	readonly onDidLanguagesChange: Event<void> = this._onDidLanguagesChange.event;
 
 	constructor(
-		@IExtensionManagementService private extensionManagementService: IExtensionManagementService,
+		@IExtensionManagementService private readonly extensionManagementService: IExtensionManagementService,
 		@IEnvironmentService environmentService: IEnvironmentService,
-		@ILogService private logService: ILogService
+		@ILogService private readonly logService: ILogService
 	) {
 		super();
 		this.cache = this._register(new LanguagePacksCache(environmentService, logService));
@@ -55,7 +55,7 @@ export class LocalizationsService extends Disposable implements ILocalizationsSe
 		this.extensionManagementService.getInstalled().then(installed => this.cache.update(installed));
 	}
 
-	getLanguageIds(type: LanguageType): Thenable<string[]> {
+	getLanguageIds(type: LanguageType): Promise<string[]> {
 		if (type === LanguageType.Core) {
 			return Promise.resolve([...systemLanguages]);
 		}
@@ -66,9 +66,9 @@ export class LocalizationsService extends Disposable implements ILocalizationsSe
 			});
 	}
 
-	private onDidInstallExtension(extension: ILocalExtension): void {
+	private onDidInstallExtension(extension: ILocalExtension | undefined): void {
 		if (extension && extension.manifest && extension.manifest.contributes && extension.manifest.contributes.localizations && extension.manifest.contributes.localizations.length) {
-			this.logService.debug('Adding language packs from the extension', extension.identifier.id);
+			this.logService.debug('Adding language packs from the extension', extension.galleryIdentifier.id);
 			this.update();
 		}
 	}
@@ -99,18 +99,18 @@ class LanguagePacksCache extends Disposable {
 
 	private languagePacks: { [language: string]: ILanguagePack } = {};
 	private languagePacksFilePath: string;
-	private languagePacksFileLimiter: Queue<void>;
+	private languagePacksFileLimiter: Queue<any>;
 
 	constructor(
 		@IEnvironmentService environmentService: IEnvironmentService,
-		@ILogService private logService: ILogService
+		@ILogService private readonly logService: ILogService
 	) {
 		super();
 		this.languagePacksFilePath = posix.join(environmentService.userDataPath, 'languagepacks.json');
-		this.languagePacksFileLimiter = new Queue<void>();
+		this.languagePacksFileLimiter = new Queue();
 	}
 
-	getLanguagePacks(): Thenable<{ [language: string]: ILanguagePack }> {
+	getLanguagePacks(): Promise<{ [language: string]: ILanguagePack }> {
 		// if queue is not empty, fetch from disk
 		if (this.languagePacksFileLimiter.size) {
 			return this.withLanguagePacks()
@@ -119,9 +119,9 @@ class LanguagePacksCache extends Disposable {
 		return Promise.resolve(this.languagePacks);
 	}
 
-	update(extensions: ILocalExtension[]): Thenable<{ [language: string]: ILanguagePack }> {
+	update(extensions: ILocalExtension[]): Promise<{ [language: string]: ILanguagePack }> {
 		return this.withLanguagePacks(languagePacks => {
-			Object.keys(languagePacks).forEach(language => languagePacks[language] = undefined);
+			Object.keys(languagePacks).forEach(language => delete languagePacks[language]);
 			this.createLanguagePacksFromExtensions(languagePacks, ...extensions);
 		}).then(() => this.languagePacks);
 	}
@@ -136,8 +136,9 @@ class LanguagePacksCache extends Disposable {
 	}
 
 	private createLanguagePacksFromExtension(languagePacks: { [language: string]: ILanguagePack }, extension: ILocalExtension): void {
-		const extensionIdentifier = { id: getGalleryExtensionIdFromLocal(extension), uuid: extension.identifier.uuid };
-		for (const localizationContribution of extension.manifest.contributes.localizations) {
+		const extensionIdentifier = extension.galleryIdentifier;
+		const localizations = extension.manifest.contributes && extension.manifest.contributes.localizations ? extension.manifest.contributes.localizations : [];
+		for (const localizationContribution of localizations) {
 			if (extension.location.scheme === Schemas.file && isValidLocalization(localizationContribution)) {
 				let languagePack = languagePacks[localizationContribution.languageId];
 				if (!languagePack) {
@@ -167,11 +168,11 @@ class LanguagePacksCache extends Disposable {
 		}
 	}
 
-	private withLanguagePacks<T>(fn: (languagePacks: { [language: string]: ILanguagePack }) => T = () => null): Thenable<T> {
+	private withLanguagePacks<T>(fn: (languagePacks: { [language: string]: ILanguagePack }) => T | null = () => null): Promise<T> {
 		return this.languagePacksFileLimiter.queue(() => {
 			let result: T | null = null;
 			return pfs.readFile(this.languagePacksFilePath, 'utf8')
-				.then(null, err => err.code === 'ENOENT' ? Promise.resolve('{}') : Promise.reject(err))
+				.then(undefined, err => err.code === 'ENOENT' ? Promise.resolve('{}') : Promise.reject(err))
 				.then<{ [language: string]: ILanguagePack }>(raw => { try { return JSON.parse(raw); } catch (e) { return {}; } })
 				.then(languagePacks => { result = fn(languagePacks); return languagePacks; })
 				.then(languagePacks => {

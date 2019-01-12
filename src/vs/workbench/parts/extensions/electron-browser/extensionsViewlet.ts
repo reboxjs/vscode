@@ -5,7 +5,7 @@
 
 import 'vs/css!./media/extensionsViewlet';
 import { localize } from 'vs/nls';
-import { ThrottledDelayer, always, timeout } from 'vs/base/common/async';
+import { ThrottledDelayer, timeout } from 'vs/base/common/async';
 import { isPromiseCanceledError } from 'vs/base/common/errors';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
@@ -24,11 +24,11 @@ import {
 	ShowOutdatedExtensionsAction, ClearExtensionsInputAction, ChangeSortAction, UpdateAllAction, CheckForUpdatesAction, DisableAllAction, EnableAllAction,
 	EnableAutoUpdateAction, DisableAutoUpdateAction, ShowBuiltInExtensionsAction, InstallVSIXAction, ChangeGroupAction
 } from 'vs/workbench/parts/extensions/electron-browser/extensionsActions';
-import { LocalExtensionType, IExtensionManagementService, IExtensionManagementServerService, IExtensionManagementServer, EnablementState } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { IExtensionManagementService, IExtensionManagementServerService, IExtensionManagementServer, EnablementState } from 'vs/platform/extensionManagement/common/extensionManagement';
 import { ExtensionsInput } from 'vs/workbench/parts/extensions/common/extensionsInput';
 import { ExtensionsListView, EnabledExtensionsView, DisabledExtensionsView, RecommendedExtensionsView, WorkspaceRecommendedExtensionsView, BuiltInExtensionsView, BuiltInThemesExtensionsView, BuiltInBasicsExtensionsView, GroupByServerExtensionsView, DefaultRecommendedExtensionsView } from './extensionsViews';
 import { OpenGlobalSettingsAction } from 'vs/workbench/parts/preferences/browser/preferencesActions';
-import { IProgressService } from 'vs/platform/progress/common/progress';
+import { IProgressService2, ProgressLocation } from 'vs/platform/progress/common/progress';
 import { IEditorGroupsService } from 'vs/workbench/services/group/common/editorGroupsService';
 import Severity from 'vs/base/common/severity';
 import { IActivityService, ProgressBadge, NumberBadge } from 'vs/workbench/services/activity/common/activity';
@@ -40,7 +40,7 @@ import { IStorageService } from 'vs/platform/storage/common/storage';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
 import { IContextKeyService, ContextKeyExpr, RawContextKey, IContextKey } from 'vs/platform/contextkey/common/contextkey';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { getGalleryExtensionIdFromLocal, getMaliciousExtensionsSet } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
+import { getMaliciousExtensionsSet } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
 import { ILogService } from 'vs/platform/log/common/log';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IWindowService } from 'vs/platform/windows/common/windows';
@@ -50,12 +50,12 @@ import { ViewletPanel } from 'vs/workbench/browser/parts/views/panelViewlet';
 import { ServiceCollection } from 'vs/platform/instantiation/common/serviceCollection';
 import { ExtensionsWorkbenchService } from 'vs/workbench/parts/extensions/node/extensionsWorkbenchService';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
-import { SingleServerExtensionManagementServerService } from 'vs/workbench/services/extensions/node/extensionManagementServerService';
 import { Query } from 'vs/workbench/parts/extensions/common/extensionQuery';
 import { SuggestEnabledInput, attachSuggestEnabledInputBoxStyler } from 'vs/workbench/parts/codeEditor/electron-browser/suggestEnabledInput';
 import { alert } from 'vs/base/browser/ui/aria/aria';
 import { createErrorWithActions } from 'vs/base/common/errorsWithActions';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { ExtensionType } from 'vs/platform/extensions/common/extensions';
 
 interface SearchInputEvent extends Event {
 	target: HTMLInputElement;
@@ -85,7 +85,7 @@ const viewIdNameMappings: { [id: string]: string } = {
 export class ExtensionsViewletViewsContribution implements IWorkbenchContribution {
 
 	constructor(
-		@IExtensionManagementServerService private extensionManagementServerService: IExtensionManagementServerService
+		@IExtensionManagementServerService private readonly extensionManagementServerService: IExtensionManagementServerService
 	) {
 		this.registerViews();
 	}
@@ -103,9 +103,9 @@ export class ExtensionsViewletViewsContribution implements IWorkbenchContributio
 		viewDescriptors.push(this.createOtherRecommendedExtensionsListViewDescriptor());
 		viewDescriptors.push(this.createWorkspaceRecommendedExtensionsListViewDescriptor());
 
-		if (this.extensionManagementServerService.otherExtensionManagementServer) {
+		if (this.extensionManagementServerService.remoteExtensionManagementServer) {
 			viewDescriptors.push(...this.createExtensionsViewDescriptorsForServer(this.extensionManagementServerService.localExtensionManagementServer));
-			viewDescriptors.push(...this.createExtensionsViewDescriptorsForServer(this.extensionManagementServerService.otherExtensionManagementServer));
+			viewDescriptors.push(...this.createExtensionsViewDescriptorsForServer(this.extensionManagementServerService.remoteExtensionManagementServer));
 		}
 
 		ViewsRegistry.registerViews(viewDescriptors);
@@ -296,12 +296,12 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 	constructor(
 		@IPartService partService: IPartService,
 		@ITelemetryService telemetryService: ITelemetryService,
-		@IProgressService private progressService: IProgressService,
+		@IProgressService2 private readonly progressService: IProgressService2,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IEditorGroupsService private editorGroupService: IEditorGroupsService,
-		@IExtensionManagementService private extensionManagementService: IExtensionManagementService,
-		@INotificationService private notificationService: INotificationService,
-		@IViewletService private viewletService: IViewletService,
+		@IEditorGroupsService private readonly editorGroupService: IEditorGroupsService,
+		@IExtensionManagementService private readonly extensionManagementService: IExtensionManagementService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@IViewletService private readonly viewletService: IViewletService,
 		@IThemeService themeService: IThemeService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IStorageService storageService: IStorageService,
@@ -309,7 +309,7 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IExtensionService extensionService: IExtensionService,
-		@IExtensionManagementServerService private extensionManagementServerService: IExtensionManagementServerService
+		@IExtensionManagementServerService private readonly extensionManagementServerService: IExtensionManagementServerService
 	) {
 		super(VIEWLET_ID, `${VIEWLET_ID}.state`, true, configurationService, partService, telemetryService, storageService, instantiationService, themeService, contextMenuService, extensionService, contextService);
 
@@ -324,7 +324,7 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 		this.defaultRecommendedExtensionsContextKey.set(!this.configurationService.getValue<boolean>(ShowRecommendationsOnlyOnDemandKey));
 		this.disposables.push(this.viewletService.onDidViewletOpen(this.onViewletOpen, this, this.disposables));
 
-		this.extensionManagementService.getInstalled(LocalExtensionType.User).then(result => {
+		this.extensionManagementService.getInstalled(ExtensionType.User).then(result => {
 			this.hasInstalledExtensionsContextKey.set(result.length > 0);
 		});
 
@@ -371,18 +371,14 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 
 		this.searchBox.onShouldFocusResults(() => this.focusListView(), this, this.disposables);
 
-		this.extensionsBox = append(this.root, $('.extensions'));
-		super.create(this.extensionsBox);
-	}
-
-	setVisible(visible: boolean): void {
-		const isVisibilityChanged = this.isVisible() !== visible;
-		super.setVisible(visible);
-		if (isVisibilityChanged) {
+		this._register(this.onDidChangeVisibility(visible => {
 			if (visible) {
 				this.searchBox.focus();
 			}
-		}
+		}));
+
+		this.extensionsBox = append(this.root, $('.extensions'));
+		super.create(this.extensionsBox);
 	}
 
 	focus(): void {
@@ -429,7 +425,7 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 				this.instantiationService.createInstance(ChangeSortAction, 'extensions.sort.rating', localize('sort by rating', "Sort By: Rating"), this.onSearchChange, 'rating'),
 				this.instantiationService.createInstance(ChangeSortAction, 'extensions.sort.name', localize('sort by name', "Sort By: Name"), this.onSearchChange, 'name'),
 				new Separator(),
-				...(this.extensionManagementServerService.otherExtensionManagementServer ? [this.groupByServerAction, new Separator()] : []),
+				...(this.extensionManagementServerService.remoteExtensionManagementServer ? [this.groupByServerAction, new Separator()] : []),
 				this.instantiationService.createInstance(CheckForUpdatesAction, CheckForUpdatesAction.ID, CheckForUpdatesAction.LABEL),
 				...(this.configurationService.getValue(AutoUpdateConfigurationKey) ? [this.instantiationService.createInstance(DisableAutoUpdateAction, DisableAutoUpdateAction.ID, DisableAutoUpdateAction.LABEL)] : [this.instantiationService.createInstance(UpdateAllAction, UpdateAllAction.ID, UpdateAllAction.LABEL), this.instantiationService.createInstance(EnableAutoUpdateAction, EnableAutoUpdateAction.ID, EnableAutoUpdateAction.LABEL)]),
 				this.instantiationService.createInstance(InstallVSIXAction, InstallVSIXAction.ID, InstallVSIXAction.LABEL),
@@ -450,7 +446,7 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 	}
 
 	private triggerSearch(immediate = false): void {
-		this.searchDelayer.trigger(() => this.doSearch(), immediate || !this.searchBox.getValue() ? 0 : 500).then(null, err => this.onError(err));
+		this.searchDelayer.trigger(() => this.doSearch(), immediate || !this.searchBox.getValue() ? 0 : 500).then(undefined, err => this.onError(err));
 	}
 
 	private normalizedQuery(): string {
@@ -466,22 +462,20 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 		this.nonEmptyWorkspaceContextKey.set(this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY);
 
 		if (value) {
-			return this.progress(Promise.all(this.panels.map(view => {
-				(<ExtensionsListView>view).show(this.normalizedQuery()).then(model => {
-					this.alertSearchResult(model.length, view.id);
-				});
-			})));
+			return this.progress(Promise.all(this.panels.map(view =>
+				(<ExtensionsListView>view).show(this.normalizedQuery())
+					.then(model => this.alertSearchResult(model.length, view.id))
+			)));
 		}
 		return Promise.resolve(null);
 	}
 
 	protected onDidAddViews(added: IAddedViewDescriptorRef[]): ViewletPanel[] {
 		const addedViews = super.onDidAddViews(added);
-		this.progress(Promise.all(addedViews.map(addedView => {
-			(<ExtensionsListView>addedView).show(this.normalizedQuery()).then(model => {
-				this.alertSearchResult(model.length, addedView.id);
-			});
-		})));
+		this.progress(Promise.all(addedViews.map(addedView =>
+			(<ExtensionsListView>addedView).show(this.normalizedQuery())
+				.then(model => this.alertSearchResult(model.length, addedView.id))
+		)));
 		return addedViews;
 	}
 
@@ -507,12 +501,11 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 	}
 
 	protected createView(viewDescriptor: IViewDescriptor, options: IViewletViewOptions): ViewletPanel {
-		if (this.extensionManagementServerService.otherExtensionManagementServer) {
+		if (this.extensionManagementServerService.remoteExtensionManagementServer) {
 			const extensionManagementServer = viewDescriptor.id === `server.extensionsList.${this.extensionManagementServerService.localExtensionManagementServer.authority}` ? this.extensionManagementServerService.localExtensionManagementServer
-				: viewDescriptor.id === `server.extensionsList.${this.extensionManagementServerService.otherExtensionManagementServer.authority}` ? this.extensionManagementServerService.otherExtensionManagementServer : null;
+				: viewDescriptor.id === `server.extensionsList.${this.extensionManagementServerService.remoteExtensionManagementServer.authority}` ? this.extensionManagementServerService.remoteExtensionManagementServer : null;
 			if (extensionManagementServer) {
 				const servicesCollection: ServiceCollection = new ServiceCollection();
-				servicesCollection.set(IExtensionManagementServerService, new SingleServerExtensionManagementServerService(extensionManagementServer));
 				servicesCollection.set(IExtensionManagementService, extensionManagementServer.extensionManagementService);
 				servicesCollection.set(IExtensionsWorkbenchService, new SyncDescriptor(ExtensionsWorkbenchService));
 				const instantiationService = this.instantiationService.createChild(servicesCollection);
@@ -550,8 +543,7 @@ export class ExtensionsViewlet extends ViewContainerViewlet implements IExtensio
 	}
 
 	private progress<T>(promise: Promise<T>): Promise<T> {
-		const progressRunner = this.progressService.show(true);
-		return always(promise, () => progressRunner.done());
+		return this.progressService.withProgress({ location: ProgressLocation.Extensions }, () => promise);
 	}
 
 	private onError(err: any): void {
@@ -587,8 +579,8 @@ export class StatusUpdater implements IWorkbenchContribution {
 	private badgeHandle: IDisposable;
 
 	constructor(
-		@IActivityService private activityService: IActivityService,
-		@IExtensionsWorkbenchService private extensionsWorkbenchService: IExtensionsWorkbenchService
+		@IActivityService private readonly activityService: IActivityService,
+		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService
 	) {
 		extensionsWorkbenchService.onChange(this.onServiceChange, this, this.disposables);
 	}
@@ -620,11 +612,11 @@ export class MaliciousExtensionChecker implements IWorkbenchContribution {
 	private disposables: IDisposable[];
 
 	constructor(
-		@IExtensionManagementService private extensionsManagementService: IExtensionManagementService,
-		@IWindowService private windowService: IWindowService,
-		@ILogService private logService: ILogService,
-		@INotificationService private notificationService: INotificationService,
-		@IEnvironmentService private environmentService: IEnvironmentService
+		@IExtensionManagementService private readonly extensionsManagementService: IExtensionManagementService,
+		@IWindowService private readonly windowService: IWindowService,
+		@ILogService private readonly logService: ILogService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@IEnvironmentService private readonly environmentService: IEnvironmentService
 	) {
 		if (!this.environmentService.disableExtensions) {
 			this.loopCheckForMaliciousExtensions();
@@ -641,15 +633,15 @@ export class MaliciousExtensionChecker implements IWorkbenchContribution {
 		return this.extensionsManagementService.getExtensionsReport().then(report => {
 			const maliciousSet = getMaliciousExtensionsSet(report);
 
-			return this.extensionsManagementService.getInstalled(LocalExtensionType.User).then(installed => {
+			return this.extensionsManagementService.getInstalled(ExtensionType.User).then(installed => {
 				const maliciousExtensions = installed
-					.filter(e => maliciousSet.has(getGalleryExtensionIdFromLocal(e)));
+					.filter(e => maliciousSet.has(e.galleryIdentifier.id));
 
 				if (maliciousExtensions.length) {
 					return Promise.all(maliciousExtensions.map(e => this.extensionsManagementService.uninstall(e, true).then(() => {
 						this.notificationService.prompt(
 							Severity.Warning,
-							localize('malicious warning', "We have uninstalled '{0}' which was reported to be problematic.", getGalleryExtensionIdFromLocal(e)),
+							localize('malicious warning', "We have uninstalled '{0}' which was reported to be problematic.", e.galleryIdentifier.id),
 							[{
 								label: localize('reloadNow', "Reload Now"),
 								run: () => this.windowService.reloadWindow()

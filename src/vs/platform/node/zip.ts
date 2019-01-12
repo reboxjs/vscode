@@ -7,13 +7,13 @@ import * as nls from 'vs/nls';
 import * as path from 'path';
 import { createWriteStream, WriteStream } from 'fs';
 import { Readable } from 'stream';
-import { nfcall, ninvoke, SimpleThrottler, createCancelablePromise } from 'vs/base/common/async';
+import { nfcall, ninvoke, Sequencer, createCancelablePromise } from 'vs/base/common/async';
 import { mkdirp, rimraf } from 'vs/base/node/pfs';
 import { open as _openZip, Entry, ZipFile } from 'yauzl';
 import * as yazl from 'yazl';
 import { ILogService } from 'vs/platform/log/common/log';
 import { CancellationToken } from 'vs/base/common/cancellation';
-import { once } from 'vs/base/common/event';
+import { Event } from 'vs/base/common/event';
 
 export interface IExtractOptions {
 	overwrite?: boolean;
@@ -62,7 +62,7 @@ function toExtractError(err: Error): ExtractError {
 		return err;
 	}
 
-	let type: ExtractErrorType | undefined = void 0;
+	let type: ExtractErrorType | undefined = undefined;
 
 	if (/end of central directory record signature not found/.test(err.message)) {
 		type = 'CorruptZip';
@@ -81,13 +81,13 @@ function extractEntry(stream: Readable, fileName: string, mode: number, targetPa
 
 	let istream: WriteStream;
 
-	once(token.onCancellationRequested)(() => {
+	Event.once(token.onCancellationRequested)(() => {
 		if (istream) {
-			istream.close();
+			istream.destroy();
 		}
 	});
 
-	return Promise.resolve(mkdirp(targetDirName, void 0, token)).then(() => new Promise((c, e) => {
+	return Promise.resolve(mkdirp(targetDirName, undefined, token)).then(() => new Promise((c, e) => {
 		if (token.isCancellationRequested) {
 			return;
 		}
@@ -108,14 +108,14 @@ function extractZip(zipfile: ZipFile, targetPath: string, options: IOptions, log
 	let last = createCancelablePromise<void>(() => Promise.resolve());
 	let extractedEntriesCount = 0;
 
-	once(token.onCancellationRequested)(() => {
+	Event.once(token.onCancellationRequested)(() => {
 		logService.debug(targetPath, 'Cancelled.');
 		last.cancel();
 		zipfile.close();
 	});
 
 	return new Promise((c, e) => {
-		const throttler = new SimpleThrottler();
+		const throttler = new Sequencer();
 
 		const readNextEntry = (token: CancellationToken) => {
 			if (token.isCancellationRequested) {
@@ -151,21 +151,21 @@ function extractZip(zipfile: ZipFile, targetPath: string, options: IOptions, log
 			// directory file names end with '/'
 			if (/\/$/.test(fileName)) {
 				const targetFileName = path.join(targetPath, fileName);
-				last = createCancelablePromise(token => mkdirp(targetFileName, void 0, token).then(() => readNextEntry(token)).then(null, e));
+				last = createCancelablePromise(token => mkdirp(targetFileName, undefined, token).then(() => readNextEntry(token)).then(undefined, e));
 				return;
 			}
 
 			const stream = ninvoke(zipfile, zipfile.openReadStream, entry);
 			const mode = modeFromEntry(entry);
 
-			last = createCancelablePromise(token => throttler.queue(() => stream.then(stream => extractEntry(stream, fileName, mode, targetPath, options, token).then(() => readNextEntry(token)))).then(null, e));
+			last = createCancelablePromise(token => throttler.queue(() => stream.then(stream => extractEntry(stream, fileName, mode, targetPath, options, token).then(() => readNextEntry(token)))).then(null!, e));
 		});
 	});
 }
 
 function openZip(zipFile: string, lazy: boolean = false): Promise<ZipFile> {
-	return nfcall<ZipFile>(_openZip, zipFile, lazy ? { lazyEntries: true } : void 0)
-		.then(null, err => Promise.reject(toExtractError(err)));
+	return nfcall<ZipFile>(_openZip, zipFile, lazy ? { lazyEntries: true } : undefined)
+		.then(undefined, err => Promise.reject(toExtractError(err)));
 }
 
 export interface IFile {
