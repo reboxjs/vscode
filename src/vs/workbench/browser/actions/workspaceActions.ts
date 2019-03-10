@@ -9,14 +9,12 @@ import { IWindowService } from 'vs/platform/windows/common/windows';
 import { ITelemetryData } from 'vs/platform/telemetry/common/telemetry';
 import { IWorkspaceContextService, WorkbenchState, IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
 import { IWorkspaceEditingService } from 'vs/workbench/services/workspace/common/workspaceEditing';
-import { WORKSPACE_FILTER, IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
-import { mnemonicButtonLabel } from 'vs/base/common/labels';
+import { IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { ADD_ROOT_FOLDER_COMMAND_ID, ADD_ROOT_FOLDER_LABEL, PICK_WORKSPACE_FOLDER_COMMAND_ID } from 'vs/workbench/browser/actions/workspaceCommands';
-import { URI } from 'vs/base/common/uri';
-import { Schemas } from 'vs/base/common/network';
 import { IFileDialogService } from 'vs/platform/dialogs/common/dialogs';
+import { INotificationService } from 'vs/platform/notification/common/notification';
 
 export class OpenFileAction extends Action {
 
@@ -132,36 +130,25 @@ export class SaveWorkspaceAsAction extends Action {
 		id: string,
 		label: string,
 		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
-		@IWorkspaceEditingService private readonly workspaceEditingService: IWorkspaceEditingService,
-		@IFileDialogService private readonly dialogService: IFileDialogService
+		@IWorkspaceEditingService private readonly workspaceEditingService: IWorkspaceEditingService
 
 	) {
 		super(id, label);
 	}
 
 	run(): Promise<any> {
-		return this.getNewWorkspaceConfigPath().then((configPathUri): Promise<void> | void => {
+		return this.workspaceEditingService.pickNewWorkspacePath().then((configPathUri): Promise<void> | void => {
 			if (configPathUri) {
-				const configPath = configPathUri.fsPath;
 				switch (this.contextService.getWorkbenchState()) {
 					case WorkbenchState.EMPTY:
 					case WorkbenchState.FOLDER:
 						const folders = this.contextService.getWorkspace().folders.map(folder => ({ uri: folder.uri }));
-						return this.workspaceEditingService.createAndEnterWorkspace(folders, configPath);
+						return this.workspaceEditingService.createAndEnterWorkspace(folders, configPathUri);
 
 					case WorkbenchState.WORKSPACE:
-						return this.workspaceEditingService.saveAndEnterWorkspace(configPath);
+						return this.workspaceEditingService.saveAndEnterWorkspace(configPathUri);
 				}
 			}
-		});
-	}
-
-	private getNewWorkspaceConfigPath(): Promise<URI | undefined> {
-		return this.dialogService.showSaveDialog({
-			saveLabel: mnemonicButtonLabel(nls.localize({ key: 'save', comment: ['&& denotes a mnemonic'] }, "&&Save")),
-			title: nls.localize('saveWorkspace', "Save Workspace"),
-			filters: WORKSPACE_FILTER,
-			defaultUri: this.dialogService.defaultWorkspacePath(Schemas.file)
 		});
 	}
 }
@@ -181,6 +168,32 @@ export class OpenWorkspaceAction extends Action {
 
 	run(event?: any, data?: ITelemetryData): Promise<any> {
 		return this.dialogService.pickWorkspaceAndOpen({ telemetryExtraData: data });
+	}
+}
+
+export class CloseWorkspaceAction extends Action {
+
+	static readonly ID = 'workbench.action.closeFolder';
+	static LABEL = nls.localize('closeWorkspace', "Close Workspace");
+
+	constructor(
+		id: string,
+		label: string,
+		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@IWindowService private readonly windowService: IWindowService
+	) {
+		super(id, label);
+	}
+
+	run(): Promise<void> {
+		if (this.contextService.getWorkbenchState() === WorkbenchState.EMPTY) {
+			this.notificationService.info(nls.localize('noWorkspaceOpened', "There is currently no workspace opened in this instance to close."));
+
+			return Promise.resolve(undefined);
+		}
+
+		return this.windowService.closeWorkspace();
 	}
 }
 
@@ -227,10 +240,11 @@ export class DuplicateWorkspaceInNewWindowAction extends Action {
 
 	run(): Promise<any> {
 		const folders = this.workspaceContextService.getWorkspace().folders;
+		const remoteAuthority = this.windowService.getConfiguration().remoteAuthority;
 
-		return this.workspacesService.createWorkspace(folders).then(newWorkspace => {
+		return this.workspacesService.createUntitledWorkspace(folders, remoteAuthority).then(newWorkspace => {
 			return this.workspaceEditingService.copyWorkspaceSettings(newWorkspace).then(() => {
-				return this.windowService.openWindow([URI.file(newWorkspace.configPath)], { forceNewWindow: true });
+				return this.windowService.openWindow([{ uri: newWorkspace.configPath, typeHint: 'file' }], { forceNewWindow: true });
 			});
 		});
 	}

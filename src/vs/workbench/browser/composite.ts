@@ -38,7 +38,7 @@ export abstract class Composite extends Component implements IComposite {
 	private _onDidFocus: Emitter<void>;
 	get onDidFocus(): Event<void> {
 		if (!this._onDidFocus) {
-			this._registerFocusTrackEvents();
+			this.registerFocusTrackEvents();
 		}
 
 		return this._onDidFocus.event;
@@ -47,13 +47,13 @@ export abstract class Composite extends Component implements IComposite {
 	private _onDidBlur: Emitter<void>;
 	get onDidBlur(): Event<void> {
 		if (!this._onDidBlur) {
-			this._registerFocusTrackEvents();
+			this.registerFocusTrackEvents();
 		}
 
 		return this._onDidBlur.event;
 	}
 
-	private _registerFocusTrackEvents(): void {
+	private registerFocusTrackEvents(): void {
 		this._onDidFocus = this._register(new Emitter<void>());
 		this._onDidBlur = this._register(new Emitter<void>());
 
@@ -174,6 +174,13 @@ export abstract class Composite extends Component implements IComposite {
 	}
 
 	/**
+	 * Provide a context to be passed to the toolbar.
+	 */
+	getActionsContext(): any {
+		return null;
+	}
+
+	/**
 	 * Returns the instance of IActionRunner to use with this composite for the
 	 * composite tool bar.
 	 */
@@ -215,15 +222,13 @@ export abstract class Composite extends Component implements IComposite {
  */
 export abstract class CompositeDescriptor<T extends Composite> {
 
-	public enabled: boolean = true;
-
 	constructor(
 		private readonly ctor: IConstructorSignature0<T>,
-		public readonly id: string,
-		public readonly name: string,
-		public readonly cssClass?: string,
-		public readonly order?: number,
-		public readonly keybindingId?: string,
+		readonly id: string,
+		readonly name: string,
+		readonly cssClass?: string,
+		readonly order?: number,
+		readonly keybindingId?: string,
 	) { }
 
 	instantiate(instantiationService: IInstantiationService): T {
@@ -236,6 +241,9 @@ export abstract class CompositeRegistry<T extends Composite> extends Disposable 
 	private readonly _onDidRegister: Emitter<CompositeDescriptor<T>> = this._register(new Emitter<CompositeDescriptor<T>>());
 	get onDidRegister(): Event<CompositeDescriptor<T>> { return this._onDidRegister.event; }
 
+	private readonly _onDidDeregister: Emitter<CompositeDescriptor<T>> = this._register(new Emitter<CompositeDescriptor<T>>());
+	get onDidDeregister(): Event<CompositeDescriptor<T>> { return this._onDidDeregister.event; }
+
 	private composites: CompositeDescriptor<T>[] = [];
 
 	protected registerComposite(descriptor: CompositeDescriptor<T>): void {
@@ -245,6 +253,16 @@ export abstract class CompositeRegistry<T extends Composite> extends Disposable 
 
 		this.composites.push(descriptor);
 		this._onDidRegister.fire(descriptor);
+	}
+
+	protected deregisterComposite(id: string): void {
+		const descriptor = this.compositeById(id);
+		if (descriptor === null) {
+			return;
+		}
+
+		this.composites.splice(this.composites.indexOf(descriptor), 1);
+		this._onDidDeregister.fire(descriptor);
 	}
 
 	getComposite(id: string): CompositeDescriptor<T> | null {

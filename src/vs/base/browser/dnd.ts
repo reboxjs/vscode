@@ -16,7 +16,9 @@ export class DelayedDragHandler extends Disposable {
 	constructor(container: HTMLElement, callback: () => void) {
 		super();
 
-		this._register(addDisposableListener(container, 'dragover', () => {
+		this._register(addDisposableListener(container, 'dragover', e => {
+			e.preventDefault(); // needed so that the drop event fires (https://stackoverflow.com/questions/21339924/drop-event-not-firing-in-chrome)
+
 			if (!this.timeout) {
 				this.timeout = setTimeout(() => {
 					callback();
@@ -71,7 +73,7 @@ export const DataTransfers = {
 	TEXT: 'text/plain'
 };
 
-export function applyDragImage(event: DragEvent, label: string, clazz: string): void {
+export function applyDragImage(event: DragEvent, label: string | null, clazz: string): void {
 	const dragImage = document.createElement('div');
 	dragImage.className = clazz;
 	dragImage.textContent = label;
@@ -88,6 +90,19 @@ export function applyDragImage(event: DragEvent, label: string, clazz: string): 
 export interface IDragAndDropData {
 	update(dataTransfer: DataTransfer): void;
 	getData(): any;
+}
+
+export class DragAndDropData<T> implements IDragAndDropData {
+
+	constructor(private data: T) { }
+
+	update(): void {
+		// noop
+	}
+
+	getData(): T {
+		return this.data;
+	}
 }
 
 export interface IStaticDND {

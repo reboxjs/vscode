@@ -109,7 +109,7 @@ export function listProcesses(rootPid: number): Promise<ProcessItem> {
 			} while (matches);
 
 			if (result) {
-				if (cmd.indexOf('node ') !== 0) {
+				if (cmd.indexOf('node ') < 0 && cmd.indexOf('node.exe') < 0) {
 					return `electron_node ${result}`;
 				}
 			}
@@ -118,60 +118,60 @@ export function listProcesses(rootPid: number): Promise<ProcessItem> {
 
 		if (process.platform === 'win32') {
 
-			// const cleanUNCPrefix = (value: string): string => {
-			// 	if (value.indexOf('\\\\?\\') === 0) {
-			// 		return value.substr(4);
-			// 	} else if (value.indexOf('\\??\\') === 0) {
-			// 		return value.substr(4);
-			// 	} else if (value.indexOf('"\\\\?\\') === 0) {
-			// 		return '"' + value.substr(5);
-			// 	} else if (value.indexOf('"\\??\\') === 0) {
-			// 		return '"' + value.substr(5);
-			// 	} else {
-			// 		return value;
-			// 	}
-			// };
+			const cleanUNCPrefix = (value: string): string => {
+				if (value.indexOf('\\\\?\\') === 0) {
+					return value.substr(4);
+				} else if (value.indexOf('\\??\\') === 0) {
+					return value.substr(4);
+				} else if (value.indexOf('"\\\\?\\') === 0) {
+					return '"' + value.substr(5);
+				} else if (value.indexOf('"\\??\\') === 0) {
+					return '"' + value.substr(5);
+				} else {
+					return value;
+				}
+			};
 
-			// (import('windows-process-tree')).then(windowsProcessTree => {
-			// 	windowsProcessTree.getProcessList(rootPid, (processList) => {
-			// 		windowsProcessTree.getProcessCpuUsage(processList, (completeProcessList) => {
-			// 			const processItems: Map<number, ProcessItem> = new Map();
-			// 			completeProcessList.forEach(process => {
-			// 				const commandLine = cleanUNCPrefix(process.commandLine || '');
-			// 				processItems.set(process.pid, {
-			// 					name: findName(commandLine),
-			// 					cmd: commandLine,
-			// 					pid: process.pid,
-			// 					ppid: process.ppid,
-			// 					load: process.cpu || 0,
-			// 					mem: process.memory || 0
-			// 				});
-			// 			});
+			(import('windows-process-tree')).then(windowsProcessTree => {
+				windowsProcessTree.getProcessList(rootPid, (processList) => {
+					windowsProcessTree.getProcessCpuUsage(processList, (completeProcessList) => {
+						const processItems: Map<number, ProcessItem> = new Map();
+						completeProcessList.forEach(process => {
+							const commandLine = cleanUNCPrefix(process.commandLine || '');
+							processItems.set(process.pid, {
+								name: findName(commandLine),
+								cmd: commandLine,
+								pid: process.pid,
+								ppid: process.ppid,
+								load: process.cpu || 0,
+								mem: process.memory || 0
+							});
+						});
 
-			// 			rootItem = processItems.get(rootPid);
-			// 			if (rootItem) {
-			// 				processItems.forEach(item => {
-			// 					let parent = processItems.get(item.ppid);
-			// 					if (parent) {
-			// 						if (!parent.children) {
-			// 							parent.children = [];
-			// 						}
-			// 						parent.children.push(item);
-			// 					}
-			// 				});
+						rootItem = processItems.get(rootPid);
+						if (rootItem) {
+							processItems.forEach(item => {
+								const parent = processItems.get(item.ppid);
+								if (parent) {
+									if (!parent.children) {
+										parent.children = [];
+									}
+									parent.children.push(item);
+								}
+							});
 
-			// 				processItems.forEach(item => {
-			// 					if (item.children) {
-			// 						item.children = item.children.sort((a, b) => a.pid - b.pid);
-			// 					}
-			// 				});
-			// 				resolve(rootItem);
-			// 			} else {
-			// 				reject(new Error(`Root process ${rootPid} not found`));
-			// 			}
-			// 		});
-			// 	}, windowsProcessTree.ProcessDataFlag.CommandLine | windowsProcessTree.ProcessDataFlag.Memory);
-			// });
+							processItems.forEach(item => {
+								if (item.children) {
+									item.children = item.children.sort((a, b) => a.pid - b.pid);
+								}
+							});
+							resolve(rootItem);
+						} else {
+							reject(new Error(`Root process ${rootPid} not found`));
+						}
+					});
+				}, windowsProcessTree.ProcessDataFlag.CommandLine | windowsProcessTree.ProcessDataFlag.Memory);
+			});
 		} else {	// OS X & Linux
 
 			const CMD = '/bin/ps -ax -o pid=,ppid=,pcpu=,pmem=,command=';
@@ -186,7 +186,7 @@ export function listProcesses(rootPid: number): Promise<ProcessItem> {
 
 					const lines = stdout.toString().split('\n');
 					for (const line of lines) {
-						let matches = PID_CMD.exec(line.trim());
+						const matches = PID_CMD.exec(line.trim());
 						if (matches && matches.length === 6) {
 							addToTree(parseInt(matches[1]), parseInt(matches[2]), matches[5], parseFloat(matches[3]), parseFloat(matches[4]));
 						}
