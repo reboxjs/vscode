@@ -17,6 +17,7 @@ import { IURLHandler, IURLService } from 'vs/platform/url/common/url';
 import { IWindowService } from 'vs/platform/windows/common/windows';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
+import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 const THIRTY_SECONDS = 30 * 1000;
@@ -90,9 +91,15 @@ export class ExtensionUrlHandler implements IExtensionUrlHandler, IURLHandler {
 		}
 
 		if (!confirmed) {
+			let uriString = uri.toString();
+
+			if (uriString.length > 40) {
+				uriString = `${uriString.substring(0, 30)}...${uriString.substring(uriString.length - 5)}`;
+			}
+
 			const result = await this.dialogService.confirm({
 				message: localize('confirmUrl', "Allow an extension to open this URL?", extensionId),
-				detail: `${extension.displayName || extension.name} (${extensionId}) wants to open a URL:\n\n${uri.toString()}`,
+				detail: `${extension.displayName || extension.name} (${extensionId}) wants to open a URL:\n\n${uriString}`,
 				primaryButton: localize('open', "&&Open"),
 				type: 'question'
 			});
@@ -148,7 +155,7 @@ export class ExtensionUrlHandler implements IExtensionUrlHandler, IURLHandler {
 
 	private async handleUnhandledURL(uri: URI, extensionIdentifier: IExtensionIdentifier): Promise<void> {
 		const installedExtensions = await this.extensionManagementService.getInstalled();
-		const extension = installedExtensions.filter(e => areSameExtensions(e.galleryIdentifier, extensionIdentifier))[0];
+		const extension = installedExtensions.filter(e => areSameExtensions(e.identifier, extensionIdentifier))[0];
 
 		// Extension is installed
 		if (extension) {
@@ -183,14 +190,14 @@ export class ExtensionUrlHandler implements IExtensionUrlHandler, IURLHandler {
 					return;
 				}
 
-				await this.extensionEnablementService.setEnablement(extension, EnablementState.Enabled);
+				await this.extensionEnablementService.setEnablement([extension], EnablementState.Enabled);
 				await this.reloadAndHandle(uri);
 			}
 		}
 
 		// Extension is not installed
 		else {
-			const galleryExtension = await this.galleryService.getExtension(extensionIdentifier);
+			const galleryExtension = await this.galleryService.getCompatibleExtension(extensionIdentifier);
 
 			if (!galleryExtension) {
 				return;
@@ -265,3 +272,5 @@ export class ExtensionUrlHandler implements IExtensionUrlHandler, IURLHandler {
 		this.uriBuffer.clear();
 	}
 }
+
+registerSingleton(IExtensionUrlHandler, ExtensionUrlHandler);

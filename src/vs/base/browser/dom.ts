@@ -615,7 +615,7 @@ export interface IDomNodePagePosition {
 	height: number;
 }
 
-export function size(element: HTMLElement, width: number, height: number): void {
+export function size(element: HTMLElement, width: number | null, height: number | null): void {
 	if (typeof width === 'number') {
 		element.style.width = `${width}px`;
 	}
@@ -1166,9 +1166,4 @@ export function animate(fn: () => void): IDisposable {
 
 	let stepDisposable = scheduleAtNextAnimationFrame(step);
 	return toDisposable(() => stepDisposable.dispose());
-}
-
-export function timeout(fn: () => void, millis: number): IDisposable {
-	const timer = setTimeout(fn, millis);
-	return toDisposable(() => clearTimeout(timer));
 }
