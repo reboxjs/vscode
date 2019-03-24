@@ -14,4 +14,4 @@ Issues1: Sometimes `yarn watch` fails. To solve, remove `node_modules` and rerun
 * [Publishing monaco-editor-core](./build/monaco/README.md)
 
 Issue1: If gulp build fails try with the local gulp package as below
-./node_modules/.bin/gulp editor-distro --max_old_space_size=4095
+`./node_modules/.bin/gulp editor-distro --max_old_space_size=4095`
