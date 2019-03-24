@@ -39,7 +39,7 @@ function extractEditor(options) {
     compilerOptions.noEmit = false;
     compilerOptions.noUnusedLocals = false;
     compilerOptions.preserveConstEnums = false;
-    compilerOptions.declaration = false;
+    compilerOptions.declaration = true;
     compilerOptions.moduleResolution = ts.ModuleResolutionKind.Classic;
     options.compilerOptions = compilerOptions;
     let result = tss.shake(options);
