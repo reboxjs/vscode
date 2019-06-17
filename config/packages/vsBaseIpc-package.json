@@ -1,0 +1,15 @@
+{
+	"name": "@vscode/base-parts-ipc",
+	"private": false,
+	"version": "1.29.1",
+	"publishConfig": {
+		"access": "public"
+	},
+	"description": "",
+	"main": "''",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "VM (http://vm.com)",
+	"license": "ISC"
+}

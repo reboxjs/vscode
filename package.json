@@ -19,6 +19,8 @@
     "precommit": "node build/gulpfile.hygiene.js",
     "gulp": "gulp --max_old_space_size=4095",
     "7z": "7z",
+    "vsBaseNodeBuild": "UV_THREADPOOL_SIZE=100 node --max_old_space_size=4096 node_modules/webpack/bin/webpack.js --display-chunks --optimize-min-chunk-size 10000 --optimize-max-chunks 10 --display-reasons --progress --color --config config/webpack.config.vsBaseNode.js",
+    "vsBaseIpcBuild": "UV_THREADPOOL_SIZE=100 node --max_old_space_size=4096 node_modules/webpack/bin/webpack.js --display-chunks --optimize-min-chunk-size 10000 --optimize-max-chunks 10 --display-reasons --progress --color --config config/webpack.config.vsBasePartsIpc.js",
     "update-grammars": "node build/npm/update-all-grammars.js",
     "update-localization-extension": "node build/npm/update-localization-extension.js",
     "smoketest": "cd test/smoke && node test/index.js",
@@ -130,6 +132,7 @@
     "sinon": "^1.17.2",
     "source-map": "^0.4.4",
     "ts-loader": "^4.4.2",
+    "tsconfig-paths-webpack-plugin": "^3.2.0",
     "tslint": "^5.16.0",
     "typescript": "3.5.2",
     "typescript-formatter": "7.1.0",
@@ -142,6 +145,7 @@
     "vscode-nls-dev": "3.2.5",
     "webpack": "^4.16.5",
     "webpack-cli": "^3.1.0",
+    "webpack-node-externals": "^1.7.2",
     "webpack-stream": "^5.1.1"
   },
   "repository": {

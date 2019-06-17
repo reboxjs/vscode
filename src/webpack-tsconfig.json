@@ -1,0 +1,37 @@
+{
+	"compilerOptions": {
+		"module": "amd",
+		"moduleResolution": "node",
+		"noImplicitAny": false,
+		"removeComments": false,
+		"preserveConstEnums": true,
+		"target": "es5",
+		"sourceMap": false,
+		"experimentalDecorators": true,
+		"declaration": true,
+		"noImplicitReturns": true,
+		"declarationDir": "../vs",
+		"baseUrl": ".",
+		"outDir": "../vs",
+		"types": [
+			"keytar",
+			"minimist",
+			"mocha",
+			"semver",
+			"sinon",
+			"winreg"
+		]
+	},
+	"include": [
+		"./typings",
+		"typings/require.d.ts",
+		"typings/thenable.d.ts",
+		"typings/es6-promise.d.ts",
+		"typings/lib.array-ext.d.ts",
+		"typings/lib.ie11_safe_es6.d.ts",
+		"vs/base/common/*"
+	],
+	"exclude": [
+		"node_modules"
+	]
+}
