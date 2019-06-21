@@ -1,0 +1,11 @@
+import 'vs/base/parts/ipc/common/ipc.net';
+import 'vs/base/parts/ipc/common/ipc';
+import 'vs/base/parts/ipc/node/ipc.cp';
+import 'vs/base/common/uuid';
+import 'vs/base/common/uriIpc';
+import 'vs/base/common/errorMessage';
+import 'vs/base/common/errors';
+import 'vs/base/common/errorsWithActions';
+import 'vs/base/common/date';
+import 'vs/base/node/config';
+import 'vs/base/node/pfs';

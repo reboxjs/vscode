@@ -22,10 +22,16 @@
 		"typings/lib.es2018.promise.d.ts",
 		"typings/lib.array-ext.d.ts",
 		"typings/lib.ie11_safe_es6.d.ts",
+		"typings/additional.d.ts",
+		"typings/node.processEnv-ext.d.ts",
+		"typings/jschardet.d.ts",
+		"../node_modules/@types/node/index.d.ts",
 		"vs/css.d.ts",
 		"vs/monaco.d.ts",
 		"vs/nls.d.ts",
 		"vs/editor/*",
+		"vs/base/node/*",
+		"vs/base/parts/*",
 		"vs/base/common/*",
 		"vs/base/browser/*",
 		"vs/base/parts/tree/*",
@@ -35,5 +41,8 @@
 	],
 	"exclude": [
 		"node_modules/*"
+	],
+	"types": [
+		"node"
 	]
 }

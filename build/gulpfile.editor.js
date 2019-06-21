@@ -71,6 +71,7 @@ const extractEditorSrcTask = task.define('extract-editor-src', () => {
 			'vs/editor/editor.main',
 			'vs/editor/editor.worker',
 			'vs/base/worker/workerMain',
+			'../build/additional-files',
 		],
 		inlineEntryPoints: [
 			apiusages,
@@ -82,6 +83,11 @@ const extractEditorSrcTask = task.define('extract-editor-src', () => {
 			'typings/es6-promise.d.ts',
 			'typings/require-monaco.d.ts',
 			"typings/lib.es2018.promise.d.ts",
+			'typings/additional.d.ts',
+			'typings/jschardet.d.ts',
+			'typings/node.processEnv-ext.d.ts',
+			'../node_modules/@types/node/index.d.ts',
+			'../node_modules/iconv-lite/lib/index.d.ts',
 			'vs/monaco.d.ts'
 		],
 		libs: [
@@ -92,7 +98,7 @@ const extractEditorSrcTask = task.define('extract-editor-src', () => {
 		redirects: {
 			'vs/base/browser/ui/octiconLabel/octiconLabel': 'vs/base/browser/ui/octiconLabel/octiconLabel.mock',
 		},
-		shakeLevel: 2, // 0-Files, 1-InnerFile, 2-ClassMembers
+		shakeLevel: 0, // 0-Files, 1-InnerFile, 2-ClassMembers
 		importIgnorePattern: /(^vs\/css!)|(promise-polyfill\/polyfill)/,
 		destRoot: path.join(root, 'out-editor-src')
 	});

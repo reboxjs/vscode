@@ -166,16 +166,24 @@ function discoverAndReadFiles(options: ITreeShakingOptions): IFileMap {
 		}
 
 		let ts_filename: string;
+		let skipCheck = false;
 		if (options.redirects[moduleId]) {
 			ts_filename = path.join(options.sourcesRoot, options.redirects[moduleId] + '.ts');
+		} else if(['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
+		'iconv-lite', 'string_decoder', 'assert'].includes(moduleId)) {
+				ts_filename = moduleId;
+				skipCheck = true;
 		} else {
 			ts_filename = path.join(options.sourcesRoot, moduleId + '.ts');
 		}
-		const ts_filecontents = fs.readFileSync(ts_filename).toString();
+		const ts_filecontents = skipCheck ? '':  fs.readFileSync(ts_filename).toString();
 		const info = ts.preProcessFile(ts_filecontents);
 		for (let i = info.importedFiles.length - 1; i >= 0; i--) {
 			const importedFileName = info.importedFiles[i].fileName;
-
+            if(['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
+            'iconv-lite', 'string_decoder', 'assert'].includes(importedFileName)){
+                continue;
+            }
 			if (options.importIgnorePattern.test(importedFileName)) {
 				// Ignore vs/css! imports
 				continue;
