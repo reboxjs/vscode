@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 const gulp = require('gulp');
+const glob = require('glob');
 const path = require('path');
 const util = require('./lib/util');
 const task = require('./lib/task');
@@ -58,21 +59,59 @@ let BUNDLED_FILE_HEADER = [
 
 const languages = i18n.defaultLanguages.concat([]);  // i18n.defaultLanguages.concat(process.env.VSCODE_QUALITY !== 'stable' ? i18n.extraLanguages : []);
 
+// ------
+const nodeModules = [
+	'fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
+	'iconv-lite', 'string_decoder', 'assert', 'crypto', 'getmac', 'net', 'yazl', 'yauzl', 'vscode-sqlite3', 'http', 'https', 'zlib',
+	'url', 'https-proxy-agent', 'http-proxy-agent', 'windows-process-tree',
+];
+const base_node_path = "./src/vs/base/[n|c]*/**/*.[t|j]s";
+const ipc_path = "./src/vs/base/parts/ipc/[n|c]*/**/*.[t|j]s";
+var glob_entries = function (globPath) {
+	var files = glob.sync(globPath, { ignore: ['./src/**/*.d.ts', './src/vs/base/node/paths.ts'] });
+	var entries = {};
+
+	for (var i = 0; i < files.length; i++) {
+		var entry = files[i];
+		var pathObj = path.parse(entry);
+		entries[path.join(pathObj.dir.replace(new RegExp('^\.\/src\/', ''), ''), pathObj.name)] = entry;
+	}
+	return entries;
+};
+
+// ------
 const extractEditorSrcTask = task.define('extract-editor-src', () => {
 	const apiusages = monacoapi.execute().usageContent;
 	const extrausages = fs.readFileSync(path.join(root, 'build', 'monaco', 'monaco.usage.recipe')).toString();
 	standalone.extractEditor({
 		sourcesRoot: path.join(root, 'src'),
+		nodeModules,
 		entryPoints: [
+			'vs/base/parts/ipc/node/ipc.net',
 			'vs/editor/editor.main',
 			'vs/editor/editor.worker',
 			'vs/base/worker/workerMain',
+			...Object.keys(glob_entries(base_node_path)),
+			...Object.keys(glob_entries(ipc_path)),
+			'vs/platform/remote/common/tunnel',
+			'vs/platform/webview/common/resourceLoader'
+
 		],
 		inlineEntryPoints: [
 			apiusages,
 			extrausages
 		],
-		shakeLevel: 2, // 0-Files, 1-InnerFile, 2-ClassMembers
+		// typings: [
+		// 	'../node_modules/@types/node/index.d.ts',
+		// 	'typings/yazl.d.ts',
+		// 	'typings/yauzl.d.ts',
+		// 	'typings/vscode-sqlite3.d.ts',
+		// 	'typings/getmac.d.ts',
+		// 	'typings/windows-process-tree.d.ts',
+		// 	'typings/http-proxy-agent.d.ts',
+		// 	'typings/https-proxy-agent.d.ts',
+		// ],
+		shakeLevel: 0, // 0-Files, 1-InnerFile, 2-ClassMembers
 		importIgnorePattern: /(^vs\/css!)/,
 		destRoot: path.join(root, 'out-editor-src'),
 		redirects: []
@@ -107,6 +146,7 @@ const createESMSourcesAndResourcesTask = task.define('extract-editor-esm', () =>
 		srcFolder: './out-editor-src',
 		outFolder: './out-editor-esm',
 		outResourcesFolder: './out-monaco-editor-core/esm',
+		nodeModules,
 		ignores: [
 			'inlineEntryPoint:0.ts',
 			'inlineEntryPoint:1.ts',
