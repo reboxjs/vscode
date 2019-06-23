@@ -156,8 +156,7 @@ function createESMSourcesAndResources2(options) {
                 }
                 let relativePath;
                 let skipIt = false;
-                if (['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
-                'iconv-lite', 'string_decoder', 'assert'].includes(importedFilename)) {
+                if (options.nodeModules.includes(importedFilename)) {
                     relativePath = importedFilename;
                     skipIt = true;
                 }

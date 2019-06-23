@@ -32,20 +32,20 @@ function shake(options) {
     const languageService = createTypeScriptLanguageService(options);
     const program = languageService.getProgram();
     const globalDiagnostics = program.getGlobalDiagnostics();
-    if (globalDiagnostics.length > 0) {
-        printDiagnostics(globalDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
-    const syntacticDiagnostics = program.getSyntacticDiagnostics();
-    if (syntacticDiagnostics.length > 0) {
-        printDiagnostics(syntacticDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
-    const semanticDiagnostics = program.getSemanticDiagnostics();
-    if (semanticDiagnostics.length > 0) {
-        printDiagnostics(semanticDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
+    // if (globalDiagnostics.length > 0) {
+    //     printDiagnostics(globalDiagnostics);
+    //     throw new Error(`Compilation Errors encountered.`);
+    // }
+    // const syntacticDiagnostics = program.getSyntacticDiagnostics();
+    // if (syntacticDiagnostics.length > 0) {
+    //     printDiagnostics(syntacticDiagnostics);
+    //     throw new Error(`Compilation Errors encountered.`);
+    // }
+    // const semanticDiagnostics = program.getSemanticDiagnostics();
+    // if (semanticDiagnostics.length > 0) {
+    //     printDiagnostics(semanticDiagnostics);
+    //     throw new Error(`Compilation Errors encountered.`);
+    // }
     markNodes(languageService, options);
     return generateResult(languageService, options.shakeLevel);
 }
@@ -105,8 +105,7 @@ function discoverAndReadFiles(options) {
         let skipCheck = false;
         if (options.redirects[moduleId]) {
             ts_filename = path.join(options.sourcesRoot, options.redirects[moduleId] + '.ts');
-        } else if(['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
-        'iconv-lite', 'string_decoder', 'assert'].includes(moduleId)) {
+        } else if(options.nodeModules.includes(moduleId)) {
                 ts_filename = moduleId;
                 skipCheck = true;
             }
@@ -117,8 +116,7 @@ function discoverAndReadFiles(options) {
         const info = ts.preProcessFile(ts_filecontents);
         for (let i = info.importedFiles.length - 1; i >= 0; i--) {
             const importedFileName = info.importedFiles[i].fileName;
-            if(['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
-            'iconv-lite', 'string_decoder', 'assert'].includes(importedFileName)){
+            if(options.nodeModules.includes(importedFileName)){
                 continue;
             }
             if (options.importIgnorePattern.test(importedFileName)) {

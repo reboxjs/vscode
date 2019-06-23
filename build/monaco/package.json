@@ -1,7 +1,6 @@
 {
-  "name": "monaco-editor-core",
-  "private": true,
-  "version": "0.16.0",
+  "name": "@vscode/monaco-editor-core",
+  "version": "1.33.1-2",
   "description": "A browser based code editor",
   "author": "Microsoft Corporation",
   "license": "MIT",
@@ -13,5 +12,21 @@
   },
   "bugs": {
     "url": "https://github.com/Microsoft/vscode/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "vscode-sqlite3": "4.0.7"
+  },
+  "optionalDependencies": {
+    "getmac": "1.4.1",
+    "graceful-fs": "4.1.11",
+    "http-proxy-agent": "^2.1.0",
+    "https-proxy-agent": "^2.2.1",
+    "iconv-lite": "0.4.23",
+    "jschardet": "1.6.0",
+    "yauzl": "^2.9.1",
+    "yazl": "^2.4.3"
   }
 }

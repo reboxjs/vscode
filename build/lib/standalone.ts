@@ -117,6 +117,7 @@ export interface IOptions2 {
 	srcFolder: string;
 	outFolder: string;
 	outResourcesFolder: string;
+	nodeModules: string[]; // @sri any references to node modules
 	ignores: string[];
 	renames: { [filename: string]: string; };
 }
@@ -181,8 +182,7 @@ export function createESMSourcesAndResources2(options: IOptions2): void {
 
 				let relativePath: string;
                 let skipIt = false;
-                if (['fs', 'os', 'util', 'child_process', 'jschardet', 'stream',
-                'iconv-lite', 'string_decoder', 'assert'].includes(importedFilename)) {
+                if (options.nodeModules.includes(importedFilename)) {
                     relativePath = importedFilename;
                     skipIt = true;
                 }
