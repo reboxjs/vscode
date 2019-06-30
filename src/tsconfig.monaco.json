@@ -8,11 +8,17 @@
 		"moduleResolution": "classic",
 		"removeComments": false,
 		"preserveConstEnums": true,
-		"target": "es5",
+		"target": "es6",
+		"lib": [
+			"dom",
+			"es5",
+			"es2015.iterable"
+		],
 		"sourceMap": false,
 		"declaration": true
 	},
 	"include": [
+		"../node_modules/@types/node/index.d.ts",
 		"typings/require.d.ts",
 		"./typings/require-monaco.d.ts",
 		"typings/thenable.d.ts",
@@ -20,10 +26,14 @@
 		"typings/lib.es2018.promise.d.ts",
 		"typings/lib.array-ext.d.ts",
 		"typings/lib.ie11_safe_es6.d.ts",
+		"typings/*.d.ts",
 		"vs/css.d.ts",
 		"vs/monaco.d.ts",
 		"vs/nls.d.ts",
 		"vs/editor/*",
+		"vs/base/node/*",
+		"vs/base/parts/ipc/common/*",
+		"vs/base/parts/ipc/node/*",
 		"vs/base/common/*",
 		"vs/base/browser/*",
 		"vs/base/parts/tree/*",
@@ -33,5 +43,8 @@
 	],
 	"exclude": [
 		"node_modules/*"
+	],
+	"types": [
+		"node"
 	]
 }

@@ -28,6 +28,10 @@ export interface ITreeShakingOptions {
 	 */
 	entryPoints: string[];
 	/**
+	 * @sri All node modules references
+	 */
+	nodeModules: string[];
+	/**
 	 * Inline usages.
 	 */
 	inlineEntryPoints: string[];
@@ -79,23 +83,23 @@ export function shake(options: ITreeShakingOptions): ITreeShakingResult {
 	const languageService = createTypeScriptLanguageService(options);
 	const program = languageService.getProgram()!;
 
-	const globalDiagnostics = program.getGlobalDiagnostics();
-	if (globalDiagnostics.length > 0) {
-		printDiagnostics(globalDiagnostics);
-		throw new Error(`Compilation Errors encountered.`);
-	}
+	// const globalDiagnostics = program.getGlobalDiagnostics();
+	// if (globalDiagnostics.length > 0) {
+	// 	printDiagnostics(globalDiagnostics);
+	// 	throw new Error(`Compilation Errors encountered.`);
+	// }
 
-	const syntacticDiagnostics = program.getSyntacticDiagnostics();
-	if (syntacticDiagnostics.length > 0) {
-		printDiagnostics(syntacticDiagnostics);
-		throw new Error(`Compilation Errors encountered.`);
-	}
+	// const syntacticDiagnostics = program.getSyntacticDiagnostics();
+	// if (syntacticDiagnostics.length > 0) {
+	// 	printDiagnostics(syntacticDiagnostics);
+	// 	throw new Error(`Compilation Errors encountered.`);
+	// }
 
-	const semanticDiagnostics = program.getSemanticDiagnostics();
-	if (semanticDiagnostics.length > 0) {
-		printDiagnostics(semanticDiagnostics);
-		throw new Error(`Compilation Errors encountered.`);
-	}
+	// const semanticDiagnostics = program.getSemanticDiagnostics();
+	// if (semanticDiagnostics.length > 0) {
+	// 	printDiagnostics(semanticDiagnostics);
+	// 	throw new Error(`Compilation Errors encountered.`);
+	// }
 
 	markNodes(languageService, options);
 
@@ -166,16 +170,25 @@ function discoverAndReadFiles(options: ITreeShakingOptions): IFileMap {
 		}
 
 		let ts_filename: string;
+		let skipCheck = false;
 		if (options.redirects[moduleId]) {
 			ts_filename = path.join(options.sourcesRoot, options.redirects[moduleId] + '.ts');
-		} else {
+		}
+		else if(options.nodeModules.includes(moduleId)) {
+			ts_filename = moduleId;
+			skipCheck = true;
+		}
+		else {
 			ts_filename = path.join(options.sourcesRoot, moduleId + '.ts');
 		}
-		const ts_filecontents = fs.readFileSync(ts_filename).toString();
+		const ts_filecontents = skipCheck ? '':  fs.readFileSync(ts_filename).toString();
 		const info = ts.preProcessFile(ts_filecontents);
 		for (let i = info.importedFiles.length - 1; i >= 0; i--) {
 			const importedFileName = info.importedFiles[i].fileName;
 
+			if(options.nodeModules.includes(importedFileName)){
+                continue;
+            }
 			if (options.importIgnorePattern.test(importedFileName)) {
 				// Ignore vs/css! imports
 				continue;

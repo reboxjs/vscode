@@ -43,7 +43,7 @@ export function extractEditor(options: tss.ITreeShakingOptions & { destRoot: str
 	compilerOptions.noEmit = false;
 	compilerOptions.noUnusedLocals = false;
 	compilerOptions.preserveConstEnums = false;
-	compilerOptions.declaration = false;
+	compilerOptions.declaration = true;
 	compilerOptions.noImplicitAny = false;
 	compilerOptions.moduleResolution = ts.ModuleResolutionKind.Classic;
 
@@ -119,6 +119,7 @@ export interface IOptions2 {
 	srcFolder: string;
 	outFolder: string;
 	outResourcesFolder: string;
+	nodeModules: string[]; // @sri any references to node modules
 	ignores: string[];
 	renames: { [filename: string]: string; };
 }
@@ -182,16 +183,23 @@ export function createESMSourcesAndResources2(options: IOptions2): void {
 				}
 
 				let relativePath: string;
-				if (importedFilepath === path.dirname(file).replace(/\\/g, '/')) {
+				let skipIt = false;
+                if (options.nodeModules.includes(importedFilename)) {
+                    relativePath = importedFilename;
+                    skipIt = true;
+                }
+				else if (importedFilepath === path.dirname(file).replace(/\\/g, '/')) {
 					relativePath = '../' + path.basename(path.dirname(file));
 				} else if (importedFilepath === path.dirname(path.dirname(file)).replace(/\\/g, '/')) {
 					relativePath = '../../' + path.basename(path.dirname(path.dirname(file)));
 				} else {
 					relativePath = path.relative(path.dirname(file), importedFilepath);
 				}
-				relativePath = relativePath.replace(/\\/g, '/');
-				if (!/(^\.\/)|(^\.\.\/)/.test(relativePath)) {
-					relativePath = './' + relativePath;
+				if(!skipIt) {
+					relativePath = relativePath.replace(/\\/g, '/');
+					if (!/(^\.\/)|(^\.\.\/)/.test(relativePath)) {
+						relativePath = './' + relativePath;
+					}
 				}
 				fileContents = (
 					fileContents.substring(0, pos + 1)
