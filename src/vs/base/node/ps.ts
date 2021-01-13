@@ -122,46 +122,46 @@ export function listProcesses(rootPid: number): Promise<ProcessItem> {
 				}
 			};
 
-			(import('windows-process-tree')).then(windowsProcessTree => {
-				windowsProcessTree.getProcessList(rootPid, (processList) => {
-					windowsProcessTree.getProcessCpuUsage(processList, (completeProcessList) => {
-						const processItems: Map<number, ProcessItem> = new Map();
-						completeProcessList.forEach(process => {
-							const commandLine = cleanUNCPrefix(process.commandLine || '');
-							processItems.set(process.pid, {
-								name: findName(commandLine),
-								cmd: commandLine,
-								pid: process.pid,
-								ppid: process.ppid,
-								load: process.cpu || 0,
-								mem: process.memory || 0
-							});
-						});
+			// (import('windows-process-tree')).then(windowsProcessTree => {
+			// 	windowsProcessTree.getProcessList(rootPid, (processList) => {
+			// 		windowsProcessTree.getProcessCpuUsage(processList, (completeProcessList) => {
+			// 			const processItems: Map<number, ProcessItem> = new Map();
+			// 			completeProcessList.forEach(process => {
+			// 				const commandLine = cleanUNCPrefix(process.commandLine || '');
+			// 				processItems.set(process.pid, {
+			// 					name: findName(commandLine),
+			// 					cmd: commandLine,
+			// 					pid: process.pid,
+			// 					ppid: process.ppid,
+			// 					load: process.cpu || 0,
+			// 					mem: process.memory || 0
+			// 				});
+			// 			});
 
-						rootItem = processItems.get(rootPid);
-						if (rootItem) {
-							processItems.forEach(item => {
-								const parent = processItems.get(item.ppid);
-								if (parent) {
-									if (!parent.children) {
-										parent.children = [];
-									}
-									parent.children.push(item);
-								}
-							});
+			// 			rootItem = processItems.get(rootPid);
+			// 			if (rootItem) {
+			// 				processItems.forEach(item => {
+			// 					const parent = processItems.get(item.ppid);
+			// 					if (parent) {
+			// 						if (!parent.children) {
+			// 							parent.children = [];
+			// 						}
+			// 						parent.children.push(item);
+			// 					}
+			// 				});
 
-							processItems.forEach(item => {
-								if (item.children) {
-									item.children = item.children.sort((a, b) => a.pid - b.pid);
-								}
-							});
-							resolve(rootItem);
-						} else {
-							reject(new Error(`Root process ${rootPid} not found`));
-						}
-					});
-				}, windowsProcessTree.ProcessDataFlag.CommandLine | windowsProcessTree.ProcessDataFlag.Memory);
-			});
+			// 				processItems.forEach(item => {
+			// 					if (item.children) {
+			// 						item.children = item.children.sort((a, b) => a.pid - b.pid);
+			// 					}
+			// 				});
+			// 				resolve(rootItem);
+			// 			} else {
+			// 				reject(new Error(`Root process ${rootPid} not found`));
+			// 			}
+			// 		});
+			// 	}, windowsProcessTree.ProcessDataFlag.CommandLine | windowsProcessTree.ProcessDataFlag.Memory);
+			// });
 		} else {	// OS X & Linux
 			function calculateLinuxCpuUsage() {
 				// Flatten rootItem to get a list of all VSCode processes

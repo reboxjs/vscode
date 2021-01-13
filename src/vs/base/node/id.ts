@@ -8,6 +8,7 @@ import * as uuid from 'vs/base/common/uuid';
 import { networkInterfaces } from 'os';
 import { TernarySearchTree } from 'vs/base/common/map';
 import { getMac } from 'vs/base/node/macAddress';
+import * as crypto from 'crypto';
 
 // http://www.techrepublic.com/blog/data-center/mac-address-scorecard-for-common-virtual-machine-platforms/
 // VMware ESX 3, Server, Workstation, Player	00-50-56, 00-0C-29, 00-05-69
@@ -91,7 +92,7 @@ export async function getMachineId(): Promise<string> {
 
 async function getMacMachineId(): Promise<string | undefined> {
 	try {
-		const crypto = await import('crypto');
+		// const crypto = await import('crypto');
 		const macAddress = await getMac();
 		return crypto.createHash('sha256').update(macAddress, 'utf8').digest('hex');
 	} catch (err) {
