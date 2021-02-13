@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CompressibleObjectTree } from 'vs/base/browser/ui/tree/objectTree';
+import { ObjectTree } from 'vs/base/browser/ui/tree/objectTree';
 import { Event } from 'vs/base/common/event';
 import { FuzzyScore } from 'vs/base/common/filters';
 import { IDisposable } from 'vs/base/common/lifecycle';
@@ -33,19 +33,19 @@ export interface ITestTreeProjection extends IDisposable {
 	getTestAtPosition(uri: URI, position: Position): ITestTreeElement | undefined;
 
 	/**
+	 * Gets whether any test is defined in the given URI.
+	 */
+	hasTestInDocument(uri: URI): boolean;
+
+	/**
 	 * Applies pending update to the tree.
 	 */
-	applyTo(tree: CompressibleObjectTree<ITestTreeElement, FuzzyScore>): void;
+	applyTo(tree: ObjectTree<ITestTreeElement, FuzzyScore>): void;
 }
 
 
 export interface ITestTreeElement {
-	/**
-	 * Computed element state. Will be set automatically if not initially provided.
-	 * The projection is responsible for clearing (or updating) this if it
-	 * becomes invalid.
-	 */
-	computedState: TestRunState | undefined;
+	readonly children: Set<ITestTreeElement>;
 
 	/**
 	 * Unique ID of the element in the tree.
@@ -83,10 +83,16 @@ export interface ITestTreeElement {
 	readonly debuggable: Iterable<TestIdWithProvider>;
 
 	/**
-	 * State of of the tree item. Mostly used for deriving the computed state.
+	 * Element state to display.
 	 */
-	readonly state?: TestRunState;
+	state: TestRunState;
+
+	/**
+	 * Whether the node's test result is 'retired' -- from an outdated test run.
+	 */
+	readonly retired: boolean;
+
+	readonly ownState: TestRunState;
 	readonly label: string;
 	readonly parentItem: ITestTreeElement | null;
-	getChildren(): Iterable<ITestTreeElement>;
 }

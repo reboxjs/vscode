@@ -19,7 +19,7 @@ const PwshPreviewMsixRegex: RegExp = /^Microsoft.PowerShellPreview_.*/;
 
 // The platform details descriptor for the platform we're on
 const isProcess64Bit: boolean = process.arch === 'x64';
-const isOS64Bit: boolean = isProcess64Bit || env.hasOwnProperty('PROCESSOR_ARCHITEW6432');
+const isOS64Bit: boolean = isProcess64Bit || os.arch() === 'x64';
 
 export interface IPowerShellExeDetails {
 	readonly displayName: string;
@@ -38,7 +38,7 @@ class PossiblePowerShellExe implements IPossiblePowerShellExe {
 
 	public async exists(): Promise<boolean> {
 		if (this.knownToExist === undefined) {
-			this.knownToExist = await pfs.fileExists(this.exePath);
+			this.knownToExist = await pfs.SymlinkSupport.existsFile(this.exePath);
 		}
 		return this.knownToExist;
 	}
@@ -100,7 +100,7 @@ async function findPSCoreWindowsInstallation(
 	const powerShellInstallBaseDir = path.join(programFilesPath, 'PowerShell');
 
 	// Ensure the base directory exists
-	if (!await pfs.dirExists(powerShellInstallBaseDir)) {
+	if (!await pfs.SymlinkSupport.existsDirectory(powerShellInstallBaseDir)) {
 		return null;
 	}
 
@@ -142,7 +142,7 @@ async function findPSCoreWindowsInstallation(
 
 		// Now look for the file
 		const exePath = path.join(powerShellInstallBaseDir, item, 'pwsh.exe');
-		if (!await pfs.fileExists(exePath)) {
+		if (!await pfs.SymlinkSupport.existsFile(exePath)) {
 			continue;
 		}
 
@@ -169,7 +169,7 @@ async function findPSCoreMsix({ findPreview }: { findPreview?: boolean } = {}): 
 	// Find the base directory for MSIX application exe shortcuts
 	const msixAppDir = path.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps');
 
-	if (!await pfs.dirExists(msixAppDir)) {
+	if (!await pfs.SymlinkSupport.existsDirectory(msixAppDir)) {
 		return null;
 	}
 

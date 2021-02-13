@@ -222,7 +222,8 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 	private readonly _updateDecorationsRunner: RunOnceScheduler;
 
 	private readonly _editorWorkerService: IEditorWorkerService;
-	protected _contextKeyService: IContextKeyService;
+	private readonly _contextKeyService: IContextKeyService;
+	private readonly _instantiationService: IInstantiationService;
 	private readonly _codeEditorService: ICodeEditorService;
 	private readonly _themeService: IThemeService;
 	private readonly _notificationService: INotificationService;
@@ -248,6 +249,7 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		this._editorWorkerService = editorWorkerService;
 		this._codeEditorService = codeEditorService;
 		this._contextKeyService = this._register(contextKeyService.createScoped(domElement));
+		this._instantiationService = instantiationService.createChild(new ServiceCollection([IContextKeyService, this._contextKeyService]));
 		this._contextKeyService.createKey('isInDiffEditor', true);
 		this._themeService = themeService;
 		this._notificationService = notificationService;
@@ -319,7 +321,9 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		this._register(dom.addStandardDisposableListener(this._overviewDomElement, 'mousedown', (e) => {
 			this._modifiedEditor.delegateVerticalScrollbarMouseDown(e);
 		}));
-		this._containerDomElement.appendChild(this._overviewDomElement);
+		if (this._renderOverviewRuler) {
+			this._containerDomElement.appendChild(this._overviewDomElement);
+		}
 
 		// Create left side
 		this._originalDomNode = document.createElement('div');
@@ -352,20 +356,8 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 
 		this._diffComputationResult = null;
 
-		const leftContextKeyService = this._contextKeyService.createScoped();
-
-		const leftServices = new ServiceCollection();
-		leftServices.set(IContextKeyService, leftContextKeyService);
-		const leftScopedInstantiationService = instantiationService.createChild(leftServices);
-
-		const rightContextKeyService = this._contextKeyService.createScoped();
-
-		const rightServices = new ServiceCollection();
-		rightServices.set(IContextKeyService, rightContextKeyService);
-		const rightScopedInstantiationService = instantiationService.createChild(rightServices);
-
-		this._originalEditor = this._createLeftHandSideEditor(options, codeEditorWidgetOptions.originalEditor || {}, leftScopedInstantiationService, leftContextKeyService);
-		this._modifiedEditor = this._createRightHandSideEditor(options, codeEditorWidgetOptions.modifiedEditor || {}, rightScopedInstantiationService, rightContextKeyService);
+		this._originalEditor = this._createLeftHandSideEditor(options, codeEditorWidgetOptions.originalEditor || {});
+		this._modifiedEditor = this._createRightHandSideEditor(options, codeEditorWidgetOptions.modifiedEditor || {});
 
 		this._originalOverviewRuler = null;
 		this._modifiedOverviewRuler = null;
@@ -493,8 +485,8 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		this._layoutOverviewRulers();
 	}
 
-	private _createLeftHandSideEditor(options: Readonly<editorBrowser.IDiffEditorConstructionOptions>, codeEditorWidgetOptions: ICodeEditorWidgetOptions, instantiationService: IInstantiationService, contextKeyService: IContextKeyService): CodeEditorWidget {
-		const editor = this._createInnerEditor(instantiationService, this._originalDomNode, this._adjustOptionsForLeftHandSide(options), codeEditorWidgetOptions);
+	private _createLeftHandSideEditor(options: Readonly<editorBrowser.IDiffEditorConstructionOptions>, codeEditorWidgetOptions: ICodeEditorWidgetOptions): CodeEditorWidget {
+		const editor = this._createInnerEditor(this._instantiationService, this._originalDomNode, this._adjustOptionsForLeftHandSide(options), codeEditorWidgetOptions);
 
 		this._register(editor.onDidScrollChange((e) => {
 			if (this._isHandlingScrollEvent) {
@@ -536,7 +528,7 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 			}
 		}));
 
-		const isInDiffLeftEditorKey = contextKeyService.createKey<boolean>('isInDiffLeftEditor', undefined);
+		const isInDiffLeftEditorKey = this._contextKeyService.createKey<boolean>('isInDiffLeftEditor', editor.hasWidgetFocus());
 		this._register(editor.onDidFocusEditorWidget(() => isInDiffLeftEditorKey.set(true)));
 		this._register(editor.onDidBlurEditorWidget(() => isInDiffLeftEditorKey.set(false)));
 
@@ -555,8 +547,8 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		return editor;
 	}
 
-	private _createRightHandSideEditor(options: Readonly<editorBrowser.IDiffEditorConstructionOptions>, codeEditorWidgetOptions: ICodeEditorWidgetOptions, instantiationService: IInstantiationService, contextKeyService: IContextKeyService): CodeEditorWidget {
-		const editor = this._createInnerEditor(instantiationService, this._modifiedDomNode, this._adjustOptionsForRightHandSide(options), codeEditorWidgetOptions);
+	private _createRightHandSideEditor(options: Readonly<editorBrowser.IDiffEditorConstructionOptions>, codeEditorWidgetOptions: ICodeEditorWidgetOptions): CodeEditorWidget {
+		const editor = this._createInnerEditor(this._instantiationService, this._modifiedDomNode, this._adjustOptionsForRightHandSide(options), codeEditorWidgetOptions);
 
 		this._register(editor.onDidScrollChange((e) => {
 			if (this._isHandlingScrollEvent) {
@@ -604,7 +596,7 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 			}
 		}));
 
-		const isInDiffRightEditorKey = contextKeyService.createKey<boolean>('isInDiffRightEditor', undefined);
+		const isInDiffRightEditorKey = this._contextKeyService.createKey<boolean>('isInDiffRightEditor', editor.hasWidgetFocus());
 		this._register(editor.onDidFocusEditorWidget(() => isInDiffRightEditorKey.set(true)));
 		this._register(editor.onDidBlurEditorWidget(() => isInDiffRightEditorKey.set(false)));
 
@@ -646,7 +638,9 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 			this._modifiedOverviewRuler.dispose();
 		}
 		this._overviewDomElement.removeChild(this._overviewViewportDomElement.domNode);
-		this._containerDomElement.removeChild(this._overviewDomElement);
+		if (this._renderOverviewRuler) {
+			this._containerDomElement.removeChild(this._overviewDomElement);
+		}
 
 		this._containerDomElement.removeChild(this._originalDomNode);
 		this._originalEditor.dispose();
@@ -759,6 +753,16 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 			// Update class name
 			this._containerDomElement.className = DiffEditorWidget._getClassName(this._themeService.getColorTheme(), this._renderSideBySide);
 		}
+
+		// renderOverviewRuler
+		if (typeof newOptions.renderOverviewRuler !== 'undefined' && this._renderOverviewRuler !== newOptions.renderOverviewRuler) {
+			this._renderOverviewRuler = newOptions.renderOverviewRuler;
+			if (this._renderOverviewRuler) {
+				this._containerDomElement.appendChild(this._overviewDomElement);
+			} else {
+				this._containerDomElement.removeChild(this._overviewDomElement);
+			}
+		}
 	}
 
 	public getModel(): editorCommon.IDiffEditorModel {
@@ -768,7 +772,7 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		};
 	}
 
-	public setModel(model: editorCommon.IDiffEditorModel): void {
+	public setModel(model: editorCommon.IDiffEditorModel | null): void {
 		// Guard us against partial null model
 		if (model && (!model.original || !model.modified)) {
 			throw new Error(!model.original ? 'DiffEditorWidget.setModel: Original model is null' : 'DiffEditorWidget.setModel: Modified model is null');
@@ -1126,15 +1130,15 @@ export class DiffEditorWidget extends Disposable implements editorBrowser.IDiffE
 		const clonedOptions = { ...options };
 		clonedOptions.inDiffEditor = true;
 		clonedOptions.automaticLayout = false;
-		clonedOptions.scrollbar = clonedOptions.scrollbar || {};
+		// Clone scrollbar options before changing them
+		clonedOptions.scrollbar = { ...(clonedOptions.scrollbar || {}) };
 		clonedOptions.scrollbar.vertical = 'visible';
 		clonedOptions.folding = false;
 		clonedOptions.codeLens = this._diffCodeLens;
 		clonedOptions.fixedOverflowWidgets = true;
 		// clonedOptions.lineDecorationsWidth = '2ch';
-		if (!clonedOptions.minimap) {
-			clonedOptions.minimap = {};
-		}
+		// Clone minimap options before changing them
+		clonedOptions.minimap = { ...(clonedOptions.minimap || {}) };
 		clonedOptions.minimap.enabled = false;
 		return clonedOptions;
 	}

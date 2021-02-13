@@ -16,6 +16,7 @@ import { ThemeIcon } from 'vs/platform/theme/common/themeService';
 import { UriDto } from 'vs/base/common/types';
 import { Iterable } from 'vs/base/common/iterator';
 import { LinkedList } from 'vs/base/common/linkedList';
+import { CSSIcon } from 'vs/base/common/codicons';
 
 export interface ILocalizedString {
 	/**
@@ -88,6 +89,7 @@ export class MenuId {
 	static readonly EditorContext = new MenuId('EditorContext');
 	static readonly EditorContextPeek = new MenuId('EditorContextPeek');
 	static readonly EditorTitle = new MenuId('EditorTitle');
+	static readonly EditorTitleRun = new MenuId('EditorTitleRun');
 	static readonly EditorTitleContext = new MenuId('EditorTitleContext');
 	static readonly EmptyEditorGroupContext = new MenuId('EmptyEditorGroupContext');
 	static readonly ExplorerContext = new MenuId('ExplorerContext');
@@ -147,7 +149,7 @@ export class MenuId {
 	static readonly TimelineTitleContext = new MenuId('TimelineTitleContext');
 	static readonly AccountsContext = new MenuId('AccountsContext');
 	static readonly PanelTitle = new MenuId('PanelTitle');
-	static readonly PanelTitleContext = new MenuId('PanelTitleContext');
+	static readonly TerminalContext = new MenuId('TerminalContext');
 
 	readonly id: number;
 	readonly _debugName: string;
@@ -174,7 +176,7 @@ export interface IMenuService {
 
 	readonly _serviceBrand: undefined;
 
-	createMenu(id: MenuId, scopedKeybindingService: IContextKeyService): IMenu;
+	createMenu(id: MenuId, contextKeyService: IContextKeyService, emitEventsForSubmenuChanges?: boolean): IMenu;
 }
 
 export type ICommandsMap = Map<string, ICommandAction>;
@@ -392,6 +394,9 @@ export class MenuItemAction implements IAction {
 		this.item = item;
 		this.alt = alt ? new MenuItemAction(alt, undefined, options, contextKeyService, _commandService) : undefined;
 		this._options = options;
+		if (ThemeIcon.isThemeIcon(item.icon)) {
+			this.class = CSSIcon.asClassName(item.icon);
+		}
 	}
 
 	dispose(): void {

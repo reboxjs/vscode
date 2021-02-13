@@ -25,6 +25,7 @@ import { IConfigurationService, ConfigurationTarget } from 'vs/platform/configur
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { DebugConfigurationProviderTriggerKind } from 'vs/workbench/api/common/extHostTypes';
 import { DebugCompoundRoot } from 'vs/workbench/contrib/debug/common/debugCompoundRoot';
+import { IAction } from 'vs/base/common/actions';
 
 export const VIEWLET_ID = 'workbench.view.debug';
 
@@ -50,16 +51,17 @@ export const CONTEXT_WATCH_EXPRESSIONS_FOCUSED = new RawContextKey<boolean>('wat
 export const CONTEXT_WATCH_EXPRESSIONS_EXIST = new RawContextKey<boolean>('watchExpressionsExist', false);
 export const CONTEXT_VARIABLES_FOCUSED = new RawContextKey<boolean>('variablesFocused', true);
 export const CONTEXT_EXPRESSION_SELECTED = new RawContextKey<boolean>('expressionSelected', false);
-export const CONTEXT_BREAKPOINT_SELECTED = new RawContextKey<boolean>('breakpointSelected', false);
+export const CONTEXT_BREAKPOINT_INPUT_FOCUSED = new RawContextKey<boolean>('breakpointInputFocused', false);
 export const CONTEXT_CALLSTACK_ITEM_TYPE = new RawContextKey<string>('callStackItemType', undefined);
 export const CONTEXT_WATCH_ITEM_TYPE = new RawContextKey<string>('watchItemType', undefined);
 export const CONTEXT_BREAKPOINT_ITEM_TYPE = new RawContextKey<string>('breakpointItemType', undefined);
-export const CONTEXT_EXCEPTION_BREAKPOINT_SUPPORTS_CONDITION = new RawContextKey<boolean>('exceptionBreakpointSupportsCondition', false);
+export const CONTEXT_BREAKPOINT_SUPPORTS_CONDITION = new RawContextKey<boolean>('breakpointSupportsCondition', false);
 export const CONTEXT_LOADED_SCRIPTS_SUPPORTED = new RawContextKey<boolean>('loadedScriptsSupported', false);
 export const CONTEXT_LOADED_SCRIPTS_ITEM_TYPE = new RawContextKey<string>('loadedScriptsItemType', undefined);
 export const CONTEXT_FOCUSED_SESSION_IS_ATTACH = new RawContextKey<boolean>('focusedSessionIsAttach', false);
 export const CONTEXT_STEP_BACK_SUPPORTED = new RawContextKey<boolean>('stepBackSupported', false);
 export const CONTEXT_RESTART_FRAME_SUPPORTED = new RawContextKey<boolean>('restartFrameSupported', false);
+export const CONTEXT_STACK_FRAME_SUPPORTS_RESTART = new RawContextKey<boolean>('stackFrameSupportsRestart', false);
 export const CONTEXT_JUMP_TO_CURSOR_SUPPORTED = new RawContextKey<boolean>('jumpToCursorSupported', false);
 export const CONTEXT_STEP_INTO_TARGETS_SUPPORTED = new RawContextKey<boolean>('stepIntoTargetsSupported', false);
 export const CONTEXT_BREAKPOINTS_EXIST = new RawContextKey<boolean>('breakpointsExist', false);
@@ -106,7 +108,7 @@ export interface ITreeElement {
 }
 
 export interface IReplElement extends ITreeElement {
-	toString(): string;
+	toString(includeSource?: boolean): string;
 	readonly sourceData?: IReplElementSource;
 }
 
@@ -131,7 +133,7 @@ export interface IExpression extends IExpressionContainer {
 
 export interface IDebugger {
 	createDebugAdapter(session: IDebugSession): Promise<IDebugAdapter>;
-	runInTerminal(args: DebugProtocol.RunInTerminalRequestArguments): Promise<number | undefined>;
+	runInTerminal(args: DebugProtocol.RunInTerminalRequestArguments, sessionId: string): Promise<number | undefined>;
 	getCustomTelemetryService(): Promise<TelemetryService | undefined>;
 }
 
@@ -350,6 +352,7 @@ export interface IStackFrame extends ITreeElement {
 	readonly frameId: number;
 	readonly range: IRange;
 	readonly source: Source;
+	readonly canRestart: boolean;
 	getScopes(): Promise<IScope[]>;
 	getMostSpecificScopes(range: IRange): Promise<ReadonlyArray<IScope>>;
 	forgetScopes(): void;
@@ -410,6 +413,7 @@ export interface IExceptionBreakpoint extends IEnablement {
 	readonly filter: string;
 	readonly label: string;
 	readonly condition: string | undefined;
+	readonly description: string | undefined;
 }
 
 export interface IDataBreakpoint extends IBaseBreakpoint {
@@ -444,9 +448,7 @@ export interface IViewModel extends ITreeElement {
 	readonly focusedStackFrame: IStackFrame | undefined;
 
 	getSelectedExpression(): IExpression | undefined;
-	getSelectedBreakpoint(): IFunctionBreakpoint | IExceptionBreakpoint | undefined;
 	setSelectedExpression(expression: IExpression | undefined): void;
-	setSelectedBreakpoint(functionBreakpoint: IFunctionBreakpoint | IExceptionBreakpoint | undefined): void;
 	updateViews(): void;
 
 	isMultiSessionView(): boolean;
@@ -454,7 +456,6 @@ export interface IViewModel extends ITreeElement {
 	onDidFocusSession: Event<IDebugSession | undefined>;
 	onDidFocusStackFrame: Event<{ stackFrame: IStackFrame | undefined, explicit: boolean }>;
 	onDidSelectExpression: Event<IExpression | undefined>;
-	onDidSelectBreakpoint: Event<IFunctionBreakpoint | IExceptionBreakpoint | undefined>;
 	onWillUpdateViews: Event<void>;
 }
 
@@ -506,6 +507,7 @@ export interface IDebugConfiguration {
 		lineHeight: number;
 		wordWrap: boolean;
 		closeOnEnd: boolean;
+		collapseIdenticalLines: boolean;
 		historySuggestions: boolean;
 	};
 	focusWindowOnBreak: boolean;
@@ -663,7 +665,7 @@ export interface IDebugAdapterTrackerFactory {
 }
 
 export interface ITerminalLauncher {
-	runInTerminal(args: DebugProtocol.RunInTerminalRequestArguments): Promise<number | undefined>;
+	runInTerminal(args: DebugProtocol.RunInTerminalRequestArguments, sessionId: string): Promise<number | undefined>;
 }
 
 export interface IConfigurationManager {
@@ -717,7 +719,7 @@ export interface IAdapterManager {
 	unregisterDebugAdapterDescriptorFactory(debugAdapterDescriptorFactory: IDebugAdapterDescriptorFactory): void;
 
 	substituteVariables(debugType: string, folder: IWorkspaceFolder | undefined, config: IConfig): Promise<IConfig>;
-	runInTerminal(debugType: string, args: DebugProtocol.RunInTerminalRequestArguments): Promise<number | undefined>;
+	runInTerminal(debugType: string, args: DebugProtocol.RunInTerminalRequestArguments, sessionId: string): Promise<number | undefined>;
 }
 
 export interface ILaunch {
@@ -852,10 +854,10 @@ export interface IDebugService {
 	addFunctionBreakpoint(name?: string, id?: string): void;
 
 	/**
-	 * Renames an already existing function breakpoint.
+	 * Updates an already existing function breakpoint.
 	 * Notifies debug adapter of breakpoint changes.
 	 */
-	renameFunctionBreakpoint(id: string, newFunctionName: string): Promise<void>;
+	updateFunctionBreakpoint(id: string, update: { name?: string, hitCondition?: string, condition?: string }): Promise<void>;
 
 	/**
 	 * Removes all function breakpoints. If id is passed only removes the function breakpoint with the passed id.
@@ -875,6 +877,8 @@ export interface IDebugService {
 	removeDataBreakpoints(id?: string): Promise<void>;
 
 	setExceptionBreakpointCondition(breakpoint: IExceptionBreakpoint, condition: string | undefined): Promise<void>;
+
+	setExceptionBreakpoints(data: DebugProtocol.ExceptionBreakpointsFilter[]): void;
 
 	/**
 	 * Sends all breakpoints to the passed session.
@@ -954,6 +958,7 @@ export interface IDebugEditorContribution extends editorCommon.IEditorContributi
 export interface IBreakpointEditorContribution extends editorCommon.IEditorContribution {
 	showBreakpointWidget(lineNumber: number, column: number | undefined, context?: BreakpointWidgetContext): void;
 	closeBreakpointWidget(): void;
+	getContextMenuActionsAtPosition(lineNumber: number, model: EditorIModel): IAction[];
 }
 
 // temporary debug helper service

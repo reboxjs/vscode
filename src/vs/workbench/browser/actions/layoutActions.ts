@@ -18,7 +18,7 @@ import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/co
 import { InEditorZenModeContext, IsCenteredLayoutContext, EditorAreaVisibleContext } from 'vs/workbench/common/editor';
 import { ContextKeyExpr, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { SideBarVisibleContext } from 'vs/workbench/common/viewlet';
-import { IViewDescriptorService, IViewsService, FocusedViewContext, ViewContainerLocation, IViewDescriptor } from 'vs/workbench/common/views';
+import { IViewDescriptorService, IViewsService, FocusedViewContext, ViewContainerLocation, IViewDescriptor, ViewContainerLocationToString } from 'vs/workbench/common/views';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
 import { INotificationService } from 'vs/platform/notification/common/notification';
 import { IActivityBarService } from 'vs/workbench/services/activityBar/browser/activityBarService';
@@ -172,7 +172,7 @@ MenuRegistry.appendMenuItems([{
 			id: ToggleSidebarPositionAction.ID,
 			title: nls.localize('move sidebar right', "Move Side Bar Right")
 		},
-		when: ContextKeyExpr.notEquals('config.workbench.sideBar.location', 'right'),
+		when: ContextKeyExpr.and(ContextKeyExpr.notEquals('config.workbench.sideBar.location', 'right'), ContextKeyExpr.equals('viewContainerLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 1
 	}
 }, {
@@ -183,7 +183,7 @@ MenuRegistry.appendMenuItems([{
 			id: ToggleSidebarPositionAction.ID,
 			title: nls.localize('move sidebar right', "Move Side Bar Right")
 		},
-		when: ContextKeyExpr.notEquals('config.workbench.sideBar.location', 'right'),
+		when: ContextKeyExpr.and(ContextKeyExpr.notEquals('config.workbench.sideBar.location', 'right'), ContextKeyExpr.equals('viewLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 1
 	}
 }, {
@@ -194,7 +194,7 @@ MenuRegistry.appendMenuItems([{
 			id: ToggleSidebarPositionAction.ID,
 			title: nls.localize('move sidebar left', "Move Side Bar Left")
 		},
-		when: ContextKeyExpr.equals('config.workbench.sideBar.location', 'right'),
+		when: ContextKeyExpr.and(ContextKeyExpr.equals('config.workbench.sideBar.location', 'right'), ContextKeyExpr.equals('viewContainerLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 1
 	}
 }, {
@@ -205,7 +205,7 @@ MenuRegistry.appendMenuItems([{
 			id: ToggleSidebarPositionAction.ID,
 			title: nls.localize('move sidebar left', "Move Side Bar Left")
 		},
-		when: ContextKeyExpr.equals('config.workbench.sideBar.location', 'right'),
+		when: ContextKeyExpr.and(ContextKeyExpr.equals('config.workbench.sideBar.location', 'right'), ContextKeyExpr.equals('viewLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 1
 	}
 }]);
@@ -295,7 +295,7 @@ MenuRegistry.appendMenuItems([{
 			id: TOGGLE_SIDEBAR_VISIBILITY_ACTION_ID,
 			title: nls.localize('compositePart.hideSideBarLabel', "Hide Side Bar"),
 		},
-		when: SideBarVisibleContext,
+		when: ContextKeyExpr.and(SideBarVisibleContext, ContextKeyExpr.equals('viewContainerLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 2
 	}
 }, {
@@ -306,7 +306,7 @@ MenuRegistry.appendMenuItems([{
 			id: TOGGLE_SIDEBAR_VISIBILITY_ACTION_ID,
 			title: nls.localize('compositePart.hideSideBarLabel', "Hide Side Bar"),
 		},
-		when: SideBarVisibleContext,
+		when: ContextKeyExpr.and(SideBarVisibleContext, ContextKeyExpr.equals('viewLocation', ViewContainerLocationToString(ViewContainerLocation.Sidebar))),
 		order: 2
 	}
 }]);
@@ -462,7 +462,7 @@ MenuRegistry.appendMenuItem(MenuId.MenubarAppearanceMenu, {
 	command: {
 		id: ToggleMenuBarAction.ID,
 		title: nls.localize({ key: 'miShowMenuBar', comment: ['&& denotes a mnemonic'] }, "Show Menu &&Bar"),
-		toggled: ContextKeyExpr.and(IsMacNativeContext.toNegated(), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'hidden'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'toggle'))
+		toggled: ContextKeyExpr.and(IsMacNativeContext.toNegated(), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'hidden'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'toggle'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'compact'))
 	},
 	when: IsMacNativeContext.toNegated(),
 	order: 0
@@ -488,36 +488,6 @@ export class ResetViewLocationsAction extends Action {
 }
 
 registry.registerWorkbenchAction(SyncActionDescriptor.from(ResetViewLocationsAction), 'View: Reset View Locations', CATEGORIES.View.value);
-
-// --- Toggle View with Command
-export class ToggleViewAction extends Action {
-
-	constructor(
-		id: string,
-		label: string,
-		private readonly viewId: string,
-		@IViewsService protected viewsService: IViewsService,
-		@IViewDescriptorService protected viewDescriptorService: IViewDescriptorService,
-		@IContextKeyService protected contextKeyService: IContextKeyService,
-		@IWorkbenchLayoutService private layoutService: IWorkbenchLayoutService,
-	) {
-		super(id, label);
-	}
-
-	async run(): Promise<void> {
-		const focusedViewId = FocusedViewContext.getValue(this.contextKeyService);
-
-		if (focusedViewId === this.viewId) {
-			if (this.viewDescriptorService.getViewLocationById(this.viewId) === ViewContainerLocation.Sidebar) {
-				this.layoutService.setSideBarHidden(true);
-			} else {
-				this.layoutService.setPanelHidden(true);
-			}
-		} else {
-			this.viewsService.openView(this.viewId, true);
-		}
-	}
-}
 
 // --- Move View with Command
 export class MoveViewAction extends Action {
@@ -708,7 +678,7 @@ export class MoveFocusedViewAction extends Action {
 			.map(viewletId => {
 				return {
 					id: viewletId,
-					label: this.viewDescriptorService.getViewContainerById(viewletId)!.name
+					label: this.viewDescriptorService.getViewContainerById(viewletId)!.title
 				};
 			}));
 
@@ -729,7 +699,7 @@ export class MoveFocusedViewAction extends Action {
 			.map(panel => {
 				return {
 					id: panel.id,
-					label: this.viewDescriptorService.getViewContainerById(panel.id)!.name
+					label: this.viewDescriptorService.getViewContainerById(panel.id)!.title
 				};
 			}));
 
