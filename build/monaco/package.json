@@ -1,5 +1,5 @@
 {
-  "name": "@vscode/monaco-editor-core",
+  "name": "@vscode-alt/monaco-editor-core",
   "version": "1.52.2",
   "description": "A browser based code editor",
   "author": "Microsoft Corporation",
