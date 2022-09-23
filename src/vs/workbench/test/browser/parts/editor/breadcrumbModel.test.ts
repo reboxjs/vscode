@@ -18,7 +18,7 @@ suite('Breadcrumb Model', function () {
 
 	const workspaceService = new TestContextService(new Workspace('ffff', [new WorkspaceFolder({ uri: URI.parse('foo:/bar/baz/ws'), name: 'ws', index: 0 })]));
 	const configService = new class extends TestConfigurationService {
-		getValue(...args: any[]) {
+		override getValue(...args: any[]) {
 			if (args[0] === 'breadcrumbs.filePath') {
 				return 'on';
 			}
@@ -27,51 +27,51 @@ suite('Breadcrumb Model', function () {
 			}
 			return super.getValue(...args);
 		}
-		updateValue() {
+		override updateValue() {
 			return Promise.resolve();
 		}
 	};
 
 	test('only uri, inside workspace', function () {
 
-		let model = new BreadcrumbsModel(URI.parse('foo:/bar/baz/ws/some/path/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
-		let elements = model.getElements();
+		const model = new BreadcrumbsModel(URI.parse('foo:/bar/baz/ws/some/path/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
+		const elements = model.getElements();
 
-		assert.equal(elements.length, 3);
-		let [one, two, three] = elements as FileElement[];
-		assert.equal(one.kind, FileKind.FOLDER);
-		assert.equal(two.kind, FileKind.FOLDER);
-		assert.equal(three.kind, FileKind.FILE);
-		assert.equal(one.uri.toString(), 'foo:/bar/baz/ws/some');
-		assert.equal(two.uri.toString(), 'foo:/bar/baz/ws/some/path');
-		assert.equal(three.uri.toString(), 'foo:/bar/baz/ws/some/path/file.ts');
+		assert.strictEqual(elements.length, 3);
+		const [one, two, three] = elements as FileElement[];
+		assert.strictEqual(one.kind, FileKind.FOLDER);
+		assert.strictEqual(two.kind, FileKind.FOLDER);
+		assert.strictEqual(three.kind, FileKind.FILE);
+		assert.strictEqual(one.uri.toString(), 'foo:/bar/baz/ws/some');
+		assert.strictEqual(two.uri.toString(), 'foo:/bar/baz/ws/some/path');
+		assert.strictEqual(three.uri.toString(), 'foo:/bar/baz/ws/some/path/file.ts');
 	});
 
 	test('display uri matters for FileElement', function () {
 
-		let model = new BreadcrumbsModel(URI.parse('foo:/bar/baz/ws/some/PATH/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
-		let elements = model.getElements();
+		const model = new BreadcrumbsModel(URI.parse('foo:/bar/baz/ws/some/PATH/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
+		const elements = model.getElements();
 
-		assert.equal(elements.length, 3);
-		let [one, two, three] = elements as FileElement[];
-		assert.equal(one.kind, FileKind.FOLDER);
-		assert.equal(two.kind, FileKind.FOLDER);
-		assert.equal(three.kind, FileKind.FILE);
-		assert.equal(one.uri.toString(), 'foo:/bar/baz/ws/some');
-		assert.equal(two.uri.toString(), 'foo:/bar/baz/ws/some/PATH');
-		assert.equal(three.uri.toString(), 'foo:/bar/baz/ws/some/PATH/file.ts');
+		assert.strictEqual(elements.length, 3);
+		const [one, two, three] = elements as FileElement[];
+		assert.strictEqual(one.kind, FileKind.FOLDER);
+		assert.strictEqual(two.kind, FileKind.FOLDER);
+		assert.strictEqual(three.kind, FileKind.FILE);
+		assert.strictEqual(one.uri.toString(), 'foo:/bar/baz/ws/some');
+		assert.strictEqual(two.uri.toString(), 'foo:/bar/baz/ws/some/PATH');
+		assert.strictEqual(three.uri.toString(), 'foo:/bar/baz/ws/some/PATH/file.ts');
 	});
 
 	test('only uri, outside workspace', function () {
 
-		let model = new BreadcrumbsModel(URI.parse('foo:/outside/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
-		let elements = model.getElements();
+		const model = new BreadcrumbsModel(URI.parse('foo:/outside/file.ts'), undefined, configService, workspaceService, new class extends mock<IOutlineService>() { });
+		const elements = model.getElements();
 
-		assert.equal(elements.length, 2);
-		let [one, two] = elements as FileElement[];
-		assert.equal(one.kind, FileKind.FOLDER);
-		assert.equal(two.kind, FileKind.FILE);
-		assert.equal(one.uri.toString(), 'foo:/outside');
-		assert.equal(two.uri.toString(), 'foo:/outside/file.ts');
+		assert.strictEqual(elements.length, 2);
+		const [one, two] = elements as FileElement[];
+		assert.strictEqual(one.kind, FileKind.FOLDER);
+		assert.strictEqual(two.kind, FileKind.FILE);
+		assert.strictEqual(one.uri.toString(), 'foo:/outside');
+		assert.strictEqual(two.uri.toString(), 'foo:/outside/file.ts');
 	});
 });

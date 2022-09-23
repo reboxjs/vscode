@@ -7,10 +7,13 @@
 
 'use strict';
 const CopyPlugin = require('copy-webpack-plugin');
-const { lchmod } = require('graceful-fs');
 const Terser = require('terser');
+const fs = require('fs');
+const path = require('path');
 
-const withBrowserDefaults = require('../shared.webpack.config').browser;
+const defaultConfig = require('../shared.webpack.config');
+const withBrowserDefaults = defaultConfig.browser;
+const browserPlugins = defaultConfig.browserPlugins;
 
 const languages = [
 	'zh-tw',
@@ -34,23 +37,25 @@ module.exports = withBrowserDefaults({
 		extension: './src/extension.browser.ts',
 	},
 	plugins: [
+		...browserPlugins(__dirname), // add plugins, don't replace inherited
+
 		// @ts-ignore
 		new CopyPlugin({
 			patterns: [
 				{
-					from: 'node_modules/typescript-web/lib/*.d.ts',
-					to: 'typescript-web/',
+					from: '../node_modules/typescript/lib/*.d.ts',
+					to: 'typescript/',
 					flatten: true
 				},
 				{
-					from: 'node_modules/typescript-web/lib/typesMap.json',
-					to: 'typescript-web/'
+					from: '../node_modules/typescript/lib/typesMap.json',
+					to: 'typescript/'
 				},
 				...languages.map(lang => ({
-					from: `node_modules/typescript-web/lib/${lang}/**/*`,
-					to: 'typescript-web/',
+					from: `../node_modules/typescript/lib/${lang}/**/*`,
+					to: 'typescript/',
 					transformPath: (targetPath) => {
-						return targetPath.replace(/node_modules[\/\\]typescript-web[\/\\]lib/, '');
+						return targetPath.replace(/\.\.[\/\\]node_modules[\/\\]typescript[\/\\]lib/, '');
 					}
 				}))
 			],
@@ -59,11 +64,14 @@ module.exports = withBrowserDefaults({
 		new CopyPlugin({
 			patterns: [
 				{
-					from: 'node_modules/typescript-web/lib/tsserver.js',
-					to: 'typescript-web/tsserver.web.js',
-					transform: (content) => {
-						return Terser.minify(content.toString()).code;
+					from: '../node_modules/typescript/lib/tsserver.js',
+					to: 'typescript/tsserver.web.js',
+					transform: async (content) => {
+						const dynamicImportCompatPath = path.join(__dirname, '..', 'node_modules', 'typescript', 'lib', 'dynamicImportCompat.js');
+						const prefix = fs.existsSync(dynamicImportCompatPath) ? fs.readFileSync(dynamicImportCompatPath) : undefined;
+						const output = await Terser.minify(content.toString());
 
+						return prefix + '\n' + output.code;
 					},
 					transformPath: (targetPath) => {
 						return targetPath.replace('tsserver.js', 'tsserver.web.js');

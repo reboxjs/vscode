@@ -18,17 +18,18 @@ import { toDisposable } from 'vs/base/common/lifecycle';
 import { Event, Emitter } from 'vs/base/common/event';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { KeyCode } from 'vs/base/common/keyCodes';
-import { ContextScopedHistoryInputBox } from 'vs/platform/browser/contextScopedHistoryWidget';
+import { ContextScopedHistoryInputBox } from 'vs/platform/history/browser/contextScopedHistoryWidget';
 import { attachInputBoxStyler, attachStylerCallback } from 'vs/platform/theme/common/styler';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { badgeBackground, badgeForeground, contrastBorder } from 'vs/platform/theme/common/colorRegistry';
 import { ReplEvaluationResult, ReplEvaluationInput } from 'vs/workbench/contrib/debug/common/replModel';
 import { localize } from 'vs/nls';
+import { Variable } from 'vs/workbench/contrib/debug/common/debugModel';
 
 
 type ParsedQuery = {
-	type: 'include' | 'exclude',
-	query: string,
+	type: 'include' | 'exclude';
+	query: string;
 };
 
 export class ReplFilter implements ITreeFilter<IReplElement> {
@@ -53,7 +54,7 @@ export class ReplFilter implements ITreeFilter<IReplElement> {
 	}
 
 	filter(element: IReplElement, parentVisibility: TreeVisibility): TreeFilterResult<void> {
-		if (element instanceof ReplEvaluationInput || element instanceof ReplEvaluationResult) {
+		if (element instanceof ReplEvaluationInput || element instanceof ReplEvaluationResult || element instanceof Variable) {
 			// Only filter the output events, everything else is visible https://github.com/microsoft/vscode/issues/105863
 			return TreeVisibility.Visible;
 		}
@@ -61,9 +62,9 @@ export class ReplFilter implements ITreeFilter<IReplElement> {
 		let includeQueryPresent = false;
 		let includeQueryMatched = false;
 
-		const text = element.toString();
+		const text = element.toString(true);
 
-		for (let { type, query } of this._parsedQueries) {
+		for (const { type, query } of this._parsedQueries) {
 			if (type === 'exclude' && ReplFilter.matchQuery(query, text)) {
 				// If exclude query matches, ignore all other queries and hide
 				return false;
@@ -80,7 +81,7 @@ export class ReplFilter implements ITreeFilter<IReplElement> {
 }
 
 export interface IFilterStatsProvider {
-	getFilterStats(): { total: number, filtered: number };
+	getFilterStats(): { total: number; filtered: number };
 }
 
 export class ReplFilterState {
@@ -104,7 +105,7 @@ export class ReplFilterState {
 		return this._filterText;
 	}
 
-	get filterStats(): { total: number, filtered: number } {
+	get filterStats(): { total: number; filtered: number } {
 		return this._stats;
 	}
 
@@ -137,6 +138,7 @@ export class ReplFilterActionViewItem extends BaseActionViewItem {
 		private placeholder: string,
 		private filters: ReplFilterState,
 		private history: string[],
+		private showHistoryHint: () => boolean,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IThemeService private readonly themeService: IThemeService,
 		@IContextViewService private readonly contextViewService: IContextViewService) {
@@ -145,7 +147,7 @@ export class ReplFilterActionViewItem extends BaseActionViewItem {
 		this._register(toDisposable(() => this.delayedFilterUpdate.cancel()));
 	}
 
-	render(container: HTMLElement): void {
+	override render(container: HTMLElement): void {
 		this.container = container;
 		this.container.classList.add('repl-panel-filter-container');
 
@@ -156,12 +158,24 @@ export class ReplFilterActionViewItem extends BaseActionViewItem {
 		this.updateClass();
 	}
 
-	focus(): void {
-		this.filterInputBox.focus();
+	override focus(): void {
+		this.filterInputBox?.focus();
+	}
+
+	override blur(): void {
+		this.filterInputBox?.blur();
+	}
+
+	override setFocusable(): void {
+		// noop input elements are focusable by default
 	}
 
 	getHistory(): string[] {
 		return this.filterInputBox.getHistory();
+	}
+
+	override get trapsArrowNavigation(): boolean {
+		return true;
 	}
 
 	private clearFilterText(): void {
@@ -171,7 +185,8 @@ export class ReplFilterActionViewItem extends BaseActionViewItem {
 	private createInput(container: HTMLElement): void {
 		this.filterInputBox = this._register(this.instantiationService.createInstance(ContextScopedHistoryInputBox, container, this.contextViewService, {
 			placeholder: this.placeholder,
-			history: this.history
+			history: this.history,
+			showHistoryHint: this.showHistoryHint
 		}));
 		this._register(attachInputBoxStyler(this.filterInputBox, this.themeService));
 		this.filterInputBox.value = this.filters.filterText;

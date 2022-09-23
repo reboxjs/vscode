@@ -3,23 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { mergeSort } from 'vs/base/common/arrays';
-import { URI } from 'vs/base/common/uri';
-
-/**
- * @deprecated use `FileAccess.asFileUri(relativePath, requireFn).fsPath`
- */
-export function getPathFromAmdModule(requirefn: typeof require, relativePath: string): string {
-	return getUriFromAmdModule(requirefn, relativePath).fsPath;
-}
-
-/**
- * @deprecated use `FileAccess.asFileUri()` for node.js contexts or `FileAccess.asBrowserUri` for browser contexts.
- */
-export function getUriFromAmdModule(requirefn: typeof require, relativePath: string): URI {
-	return URI.parse(requirefn.toUrl(relativePath));
-}
-
 export abstract class LoaderStats {
 	abstract get amdLoad(): [string, number][];
 	abstract get amdInvoke(): [string, number][];
@@ -27,10 +10,7 @@ export abstract class LoaderStats {
 	abstract get nodeEval(): [string, number][];
 	abstract get nodeRequireTotal(): number;
 
-
 	static get(): LoaderStats {
-
-
 		const amdLoadScript = new Map<string, number>();
 		const amdInvokeFactory = new Map<string, number>();
 		const nodeRequire = new Map<string, number>();
@@ -46,7 +26,7 @@ export abstract class LoaderStats {
 		}
 
 		function diff(map: Map<string, number>, stat: LoaderEvent) {
-			let duration = map.get(stat.detail);
+			const duration = map.get(stat.detail);
 			if (!duration) {
 				// console.warn('BAD events, end WITHOUT start', stat);
 				// map.delete(stat.detail);
@@ -60,7 +40,7 @@ export abstract class LoaderStats {
 			map.set(stat.detail, duration + stat.timestamp);
 		}
 
-		const stats = mergeSort(require.getStats().slice(0), (a, b) => a.timestamp - b.timestamp);
+		const stats = require.getStats().slice(0).sort((a, b) => a.timestamp - b.timestamp);
 
 		for (const stat of stats) {
 			switch (stat.type) {
@@ -99,7 +79,7 @@ export abstract class LoaderStats {
 		nodeRequire.forEach(value => nodeRequireTotal += value);
 
 		function to2dArray(map: Map<string, number>): [string, number][] {
-			let res: [string, number][] = [];
+			const res: [string, number][] = [];
 			map.forEach((value, index) => res.push([index, value]));
 			return res;
 		}
@@ -116,7 +96,7 @@ export abstract class LoaderStats {
 	static toMarkdownTable(header: string[], rows: Array<Array<{ toString(): string } | undefined>>): string {
 		let result = '';
 
-		let lengths: number[] = [];
+		const lengths: number[] = [];
 		header.forEach((cell, ci) => {
 			lengths[ci] = cell.length;
 		});

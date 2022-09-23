@@ -14,13 +14,12 @@ import { TimelineHasProviderContext, TimelineService } from 'vs/workbench/contri
 import { TimelinePane } from './timelinePane';
 import { IConfigurationRegistry, Extensions as ConfigurationExtensions } from 'vs/platform/configuration/common/configurationRegistry';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
-import { MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
+import { ISubmenuItem, MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
 import { ICommandHandler, CommandsRegistry } from 'vs/platform/commands/common/commands';
 import { ExplorerFolderContext } from 'vs/workbench/contrib/files/common/files';
-import { ResourceContextKey } from 'vs/workbench/common/resources';
+import { ResourceContextKey } from 'vs/workbench/common/contextkeys';
 import { Codicon } from 'vs/base/common/codicons';
 import { registerIcon } from 'vs/platform/theme/common/iconRegistry';
-
 
 const timelineViewIcon = registerIcon('timeline-view-icon', Codicon.history, localize('timelineViewIcon', 'View icon of the timeline view.'));
 const timelineOpenIcon = registerIcon('timeline-open', Codicon.history, localize('timelineOpenIcon', 'Icon for the open timeline action.'));
@@ -49,23 +48,15 @@ configurationRegistry.registerConfiguration({
 	title: localize('timelineConfigurationTitle', "Timeline"),
 	type: 'object',
 	properties: {
-		'timeline.excludeSources': {
-			type: [
-				'array',
-				'null'
-			],
-			default: null,
-			description: localize('timeline.excludeSources', "An array of Timeline sources that should be excluded from the Timeline view"),
-		},
 		'timeline.pageSize': {
 			type: ['number', 'null'],
 			default: null,
-			markdownDescription: localize('timeline.pageSize', "The number of items to show in the Timeline view by default and when loading more items. Setting to `null` (the default) will automatically choose a page size based on the visible area of the Timeline view"),
+			markdownDescription: localize('timeline.pageSize', "The number of items to show in the Timeline view by default and when loading more items. Setting to `null` (the default) will automatically choose a page size based on the visible area of the Timeline view."),
 		},
 		'timeline.pageOnScroll': {
 			type: 'boolean',
 			default: false,
-			description: localize('timeline.pageOnScroll', "Experimental. Controls whether the Timeline view will load the next page of items when you scroll to the end of the list"),
+			description: localize('timeline.pageOnScroll', "Experimental. Controls whether the Timeline view will load the next page of items when you scroll to the end of the list."),
 		},
 	}
 });
@@ -95,7 +86,17 @@ MenuRegistry.appendMenuItem(MenuId.ExplorerContext, ({
 		title: OpenTimelineAction.LABEL,
 		icon: timelineOpenIcon
 	},
-	when: ContextKeyExpr.and(ExplorerFolderContext.toNegated(), ResourceContextKey.HasResource)
+	when: ContextKeyExpr.and(ExplorerFolderContext.toNegated(), ResourceContextKey.HasResource, TimelineHasProviderContext)
 }));
+
+const timelineFilter = registerIcon('timeline-filter', Codicon.filter, localize('timelineFilter', 'Icon for the filter timeline action.'));
+
+MenuRegistry.appendMenuItem(MenuId.TimelineTitle, <ISubmenuItem>{
+	submenu: MenuId.TimelineFilterSubMenu,
+	title: localize('filterTimeline', "Filter Timeline"),
+	group: 'navigation',
+	order: 100,
+	icon: timelineFilter
+});
 
 registerSingleton(ITimelineService, TimelineService, true);

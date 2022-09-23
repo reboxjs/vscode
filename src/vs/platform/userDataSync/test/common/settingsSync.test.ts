@@ -4,18 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
-import { IUserDataSyncStoreService, IUserDataSyncService, SyncResource, UserDataSyncError, UserDataSyncErrorCode, ISyncData, SyncStatus } from 'vs/platform/userDataSync/common/userDataSync';
-import { UserDataSyncClient, UserDataSyncTestServer } from 'vs/platform/userDataSync/test/common/userDataSyncClient';
-import { DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
-import { SettingsSynchroniser, ISettingsSyncContent, parseSettingsSyncContent } from 'vs/platform/userDataSync/common/settingsSync';
-import { UserDataSyncService } from 'vs/platform/userDataSync/common/userDataSyncService';
-import { IFileService } from 'vs/platform/files/common/files';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { VSBuffer } from 'vs/base/common/buffer';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IConfigurationRegistry, Extensions, ConfigurationScope } from 'vs/platform/configuration/common/configurationRegistry';
 import { Event } from 'vs/base/common/event';
+import { DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { ConfigurationScope, Extensions, IConfigurationRegistry } from 'vs/platform/configuration/common/configurationRegistry';
+import { IFileService } from 'vs/platform/files/common/files';
+import { Registry } from 'vs/platform/registry/common/platform';
+import { IUserDataProfile, IUserDataProfilesService } from 'vs/platform/userDataProfile/common/userDataProfile';
+import { ISettingsSyncContent, parseSettingsSyncContent, SettingsSynchroniser } from 'vs/platform/userDataSync/common/settingsSync';
+import { ISyncData, IUserDataSyncStoreService, SyncResource, SyncStatus, UserDataSyncError, UserDataSyncErrorCode } from 'vs/platform/userDataSync/common/userDataSync';
+import { UserDataSyncClient, UserDataSyncTestServer } from 'vs/platform/userDataSync/test/common/userDataSyncClient';
 
 Registry.as<IConfigurationRegistry>(Extensions.Configuration).registerConfiguration({
 	'id': 'settingsSync',
@@ -42,7 +41,7 @@ suite('SettingsSync - Auto', () => {
 	setup(async () => {
 		client = disposableStore.add(new UserDataSyncClient(server));
 		await client.setUp(true);
-		testObject = (client.instantiationService.get(IUserDataSyncService) as UserDataSyncService).getSynchroniser(SyncResource.Settings) as SettingsSynchroniser;
+		testObject = client.getSynchronizer(SyncResource.Settings) as SettingsSynchroniser;
 		disposableStore.add(toDisposable(() => client.instantiationService.get(IUserDataSyncStoreService).clear()));
 	});
 
@@ -50,47 +49,47 @@ suite('SettingsSync - Auto', () => {
 
 	test('when settings file does not exist', async () => {
 		const fileService = client.instantiationService.get(IFileService);
-		const settingResource = client.instantiationService.get(IEnvironmentService).settingsResource;
+		const settingResource = client.instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource;
 
-		assert.deepEqual(await testObject.getLastSyncUserData(), null);
-		let manifest = await client.manifest();
+		assert.deepStrictEqual(await testObject.getLastSyncUserData(), null);
+		let manifest = await client.getResourceManifest();
 		server.reset();
 		await testObject.sync(manifest);
 
-		assert.deepEqual(server.requests, [
+		assert.deepStrictEqual(server.requests, [
 			{ type: 'GET', url: `${server.url}/v1/resource/${testObject.resource}/latest`, headers: {} },
 		]);
 		assert.ok(!await fileService.exists(settingResource));
 
 		const lastSyncUserData = await testObject.getLastSyncUserData();
 		const remoteUserData = await testObject.getRemoteUserData(null);
-		assert.deepEqual(lastSyncUserData!.ref, remoteUserData.ref);
-		assert.deepEqual(lastSyncUserData!.syncData, remoteUserData.syncData);
-		assert.equal(lastSyncUserData!.syncData, null);
+		assert.deepStrictEqual(lastSyncUserData!.ref, remoteUserData.ref);
+		assert.deepStrictEqual(lastSyncUserData!.syncData, remoteUserData.syncData);
+		assert.strictEqual(lastSyncUserData!.syncData, null);
 
-		manifest = await client.manifest();
+		manifest = await client.getResourceManifest();
 		server.reset();
 		await testObject.sync(manifest);
-		assert.deepEqual(server.requests, []);
+		assert.deepStrictEqual(server.requests, []);
 
-		manifest = await client.manifest();
+		manifest = await client.getResourceManifest();
 		server.reset();
 		await testObject.sync(manifest);
-		assert.deepEqual(server.requests, []);
+		assert.deepStrictEqual(server.requests, []);
 	});
 
 	test('when settings file is empty and remote has no changes', async () => {
 		const fileService = client.instantiationService.get(IFileService);
-		const settingsResource = client.instantiationService.get(IEnvironmentService).settingsResource;
+		const settingsResource = client.instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource;
 		await fileService.writeFile(settingsResource, VSBuffer.fromString(''));
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const lastSyncUserData = await testObject.getLastSyncUserData();
 		const remoteUserData = await testObject.getRemoteUserData(null);
-		assert.equal(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, '{}');
-		assert.equal(parseSettingsSyncContent(remoteUserData!.syncData!.content!)?.settings, '{}');
-		assert.equal((await fileService.readFile(settingsResource)).value.toString(), '');
+		assert.strictEqual(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, '{}');
+		assert.strictEqual(parseSettingsSyncContent(remoteUserData!.syncData!.content!)?.settings, '{}');
+		assert.strictEqual((await fileService.readFile(settingsResource)).value.toString(), '');
 	});
 
 	test('when settings file is empty and remote has changes', async () => {
@@ -118,43 +117,43 @@ suite('SettingsSync - Auto', () => {
 	// Experimental
 	"workbench.view.experimental.allowMovingToNewContainer": true,
 }`;
-		await client2.instantiationService.get(IFileService).writeFile(client2.instantiationService.get(IEnvironmentService).settingsResource, VSBuffer.fromString(content));
+		await client2.instantiationService.get(IFileService).writeFile(client2.instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource, VSBuffer.fromString(content));
 		await client2.sync();
 
 		const fileService = client.instantiationService.get(IFileService);
-		const settingsResource = client.instantiationService.get(IEnvironmentService).settingsResource;
+		const settingsResource = client.instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource;
 		await fileService.writeFile(settingsResource, VSBuffer.fromString(''));
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const lastSyncUserData = await testObject.getLastSyncUserData();
 		const remoteUserData = await testObject.getRemoteUserData(null);
-		assert.equal(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, content);
-		assert.equal(parseSettingsSyncContent(remoteUserData!.syncData!.content!)?.settings, content);
-		assert.equal((await fileService.readFile(settingsResource)).value.toString(), content);
+		assert.strictEqual(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, content);
+		assert.strictEqual(parseSettingsSyncContent(remoteUserData!.syncData!.content!)?.settings, content);
+		assert.strictEqual((await fileService.readFile(settingsResource)).value.toString(), content);
 	});
 
 	test('when settings file is created after first sync', async () => {
 		const fileService = client.instantiationService.get(IFileService);
 
-		const settingsResource = client.instantiationService.get(IEnvironmentService).settingsResource;
-		await testObject.sync(await client.manifest());
+		const settingsResource = client.instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource;
+		await testObject.sync(await client.getResourceManifest());
 		await fileService.createFile(settingsResource, VSBuffer.fromString('{}'));
 
 		let lastSyncUserData = await testObject.getLastSyncUserData();
-		const manifest = await client.manifest();
+		const manifest = await client.getResourceManifest();
 		server.reset();
 		await testObject.sync(manifest);
 
-		assert.deepEqual(server.requests, [
+		assert.deepStrictEqual(server.requests, [
 			{ type: 'POST', url: `${server.url}/v1/resource/${testObject.resource}`, headers: { 'If-Match': lastSyncUserData?.ref } },
 		]);
 
 		lastSyncUserData = await testObject.getLastSyncUserData();
 		const remoteUserData = await testObject.getRemoteUserData(null);
-		assert.deepEqual(lastSyncUserData!.ref, remoteUserData.ref);
-		assert.deepEqual(lastSyncUserData!.syncData, remoteUserData.syncData);
-		assert.equal(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, '{}');
+		assert.deepStrictEqual(lastSyncUserData!.ref, remoteUserData.ref);
+		assert.deepStrictEqual(lastSyncUserData!.syncData, remoteUserData.syncData);
+		assert.strictEqual(parseSettingsSyncContent(lastSyncUserData!.syncData!.content!)?.settings, '{}');
 	});
 
 	test('sync for first time to the server', async () => {
@@ -182,12 +181,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 
 		await updateSettings(expected, client);
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, expected);
+		assert.deepStrictEqual(actual, expected);
 	});
 
 	test('do not sync machine settings', async () => {
@@ -206,12 +205,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 	"files.simpleDialog.enable": true,
@@ -237,12 +236,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 	"files.simpleDialog.enable": true,
@@ -268,12 +267,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 
@@ -292,12 +291,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 }`);
 	});
 
@@ -310,12 +309,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	,
 }`);
 	});
@@ -328,7 +327,7 @@ suite('SettingsSync - Auto', () => {
 }`;
 
 		await updateSettings(content, client);
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const promise = Event.toPromise(testObject.onDidChangeLocal);
 		await updateSettings(`{
@@ -362,12 +361,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 	"files.simpleDialog.enable": true,
@@ -410,12 +409,12 @@ suite('SettingsSync - Auto', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 	"files.simpleDialog.enable": true,
@@ -458,11 +457,22 @@ suite('SettingsSync - Auto', () => {
 		await updateSettings(expected, client);
 
 		try {
-			await testObject.sync(await client.manifest());
+			await testObject.sync(await client.getResourceManifest());
 			assert.fail('should fail with invalid content error');
 		} catch (e) {
 			assert.ok(e instanceof UserDataSyncError);
-			assert.deepEqual((<UserDataSyncError>e).code, UserDataSyncErrorCode.LocalInvalidContent);
+			assert.deepStrictEqual((<UserDataSyncError>e).code, UserDataSyncErrorCode.LocalInvalidContent);
+		}
+	});
+
+	test('sync throws invalid content error - content is an array', async () => {
+		await updateSettings('[]', client);
+		try {
+			await testObject.sync(await client.getResourceManifest());
+			assert.fail('should fail with invalid content error');
+		} catch (e) {
+			assert.ok(e instanceof UserDataSyncError);
+			assert.deepStrictEqual((<UserDataSyncError>e).code, UserDataSyncErrorCode.LocalInvalidContent);
 		}
 	});
 
@@ -481,16 +491,35 @@ suite('SettingsSync - Auto', () => {
 			'b': 1,
 			'settingsSync.ignoredSettings': ['a']
 		}), client);
-		await testObject.sync(await client.manifest());
+		await testObject.sync(await client.getResourceManifest());
 
-		assert.equal(testObject.status, SyncStatus.HasConflicts);
-		assert.equal(testObject.conflicts[0].localResource.toString(), testObject.localResource);
+		assert.strictEqual(testObject.status, SyncStatus.HasConflicts);
+		assert.strictEqual(testObject.conflicts.conflicts[0].localResource.toString(), testObject.localResource.toString());
 
 		const fileService = client.instantiationService.get(IFileService);
-		const mergeContent = (await fileService.readFile(testObject.conflicts[0].previewResource)).value.toString();
-		assert.deepEqual(JSON.parse(mergeContent), {
-			'b': 1,
-			'settingsSync.ignoredSettings': ['a']
+		const mergeContent = (await fileService.readFile(testObject.conflicts.conflicts[0].previewResource)).value.toString();
+		assert.strictEqual(mergeContent, '');
+	});
+
+	test('sync profile settings', async () => {
+		const client2 = disposableStore.add(new UserDataSyncClient(server));
+		await client2.setUp(true);
+		const profile = await client2.instantiationService.get(IUserDataProfilesService).createNamedProfile('profile1');
+		await updateSettings(JSON.stringify({
+			'a': 1,
+			'b': 2,
+		}), client2, profile);
+		await client2.sync();
+
+		await client.sync();
+
+		assert.strictEqual(testObject.status, SyncStatus.Idle);
+
+		const syncedProfile = client.instantiationService.get(IUserDataProfilesService).profiles.find(p => p.id === profile.id)!;
+		const content = (await client.instantiationService.get(IFileService).readFile(syncedProfile.settingsResource)).value.toString();
+		assert.deepStrictEqual(JSON.parse(content), {
+			'a': 1,
+			'b': 2,
 		});
 	});
 
@@ -506,7 +535,7 @@ suite('SettingsSync - Manual', () => {
 	setup(async () => {
 		client = disposableStore.add(new UserDataSyncClient(server));
 		await client.setUp(true);
-		testObject = (client.instantiationService.get(IUserDataSyncService) as UserDataSyncService).getSynchroniser(SyncResource.Settings) as SettingsSynchroniser;
+		testObject = client.getSynchronizer(SyncResource.Settings) as SettingsSynchroniser;
 		disposableStore.add(toDisposable(() => client.instantiationService.get(IUserDataSyncStoreService).clear()));
 	});
 
@@ -536,15 +565,15 @@ suite('SettingsSync - Manual', () => {
 }`;
 		await updateSettings(settingsContent, client);
 
-		let preview = await testObject.preview(await client.manifest());
-		assert.equal(testObject.status, SyncStatus.Syncing);
+		let preview = await testObject.preview(await client.getResourceManifest(), {});
+		assert.strictEqual(testObject.status, SyncStatus.Syncing);
 		preview = await testObject.accept(preview!.resourcePreviews[0].previewResource);
 		preview = await testObject.apply(false);
 
 		const { content } = await client.read(testObject.resource);
 		assert.ok(content !== null);
 		const actual = parseSettings(content!);
-		assert.deepEqual(actual, `{
+		assert.deepStrictEqual(actual, `{
 	// Always
 	"files.autoSave": "afterDelay",
 	"files.simpleDialog.enable": true,
@@ -568,7 +597,7 @@ function parseSettings(content: string): string {
 	return settingsSyncContent.settings;
 }
 
-async function updateSettings(content: string, client: UserDataSyncClient): Promise<void> {
-	await client.instantiationService.get(IFileService).writeFile(client.instantiationService.get(IEnvironmentService).settingsResource, VSBuffer.fromString(content));
+async function updateSettings(content: string, client: UserDataSyncClient, profile?: IUserDataProfile): Promise<void> {
+	await client.instantiationService.get(IFileService).writeFile((profile ?? client.instantiationService.get(IUserDataProfilesService).defaultProfile).settingsResource, VSBuffer.fromString(content));
 	await client.instantiationService.get(IConfigurationService).reloadConfiguration();
 }

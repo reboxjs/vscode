@@ -14,7 +14,7 @@ import { IViewDescriptor } from 'vs/workbench/common/views';
 import { isStringArray } from 'vs/base/common/types';
 import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
-import { ContextKeyEqualsExpr, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
+import { ContextKeyExpr, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { SelectActionViewItem } from 'vs/base/browser/ui/actionbar/actionViewItems';
 import { Action2, MenuId } from 'vs/platform/actions/common/actions';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -46,7 +46,7 @@ export class SwitchRemoteViewItem extends SelectActionViewItem {
 			const remoteAuthority = this.environmentService.remoteAuthority;
 			isSetForConnection = true;
 			const explorerType: string[] | undefined = remoteAuthority ? [remoteAuthority.split('+')[0]] :
-				this.storageService.get(REMOTE_EXPLORER_TYPE_KEY, StorageScope.WORKSPACE)?.split(',') ?? this.storageService.get(REMOTE_EXPLORER_TYPE_KEY, StorageScope.GLOBAL)?.split(',');
+				this.storageService.get(REMOTE_EXPLORER_TYPE_KEY, StorageScope.WORKSPACE)?.split(',') ?? this.storageService.get(REMOTE_EXPLORER_TYPE_KEY, StorageScope.PROFILE)?.split(',');
 			if (explorerType !== undefined) {
 				index = this.getOptionIndexForExplorerType(explorerType);
 			}
@@ -76,19 +76,19 @@ export class SwitchRemoteViewItem extends SelectActionViewItem {
 		return index;
 	}
 
-	render(container: HTMLElement) {
+	override render(container: HTMLElement) {
 		if (this.optionsItems.length > 1) {
 			super.render(container);
 			container.classList.add('switch-remote');
 		}
 	}
 
-	protected getActionContext(_: string, index: number): any {
+	protected override getActionContext(_: string, index: number): any {
 		return this.optionsItems[index];
 	}
 
 	static createOptionItems(views: IViewDescriptor[], contextKeyService: IContextKeyService): IRemoteSelectItem[] {
-		let options: IRemoteSelectItem[] = [];
+		const options: IRemoteSelectItem[] = [];
 		views.forEach(view => {
 			if (view.group && view.group.startsWith('targets') && view.remoteAuthority && (!view.when || contextKeyService.contextMatchesRules(view.when))) {
 				options.push({ text: view.name, authority: isStringArray(view.remoteAuthority) ? view.remoteAuthority : [view.remoteAuthority] });
@@ -109,7 +109,7 @@ export class SwitchRemoteAction extends Action2 {
 			title: SwitchRemoteAction.LABEL,
 			menu: [{
 				id: MenuId.ViewContainerTitle,
-				when: ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID),
+				when: ContextKeyExpr.equals('viewContainer', VIEWLET_ID),
 				group: 'navigation',
 				order: 1
 			}],

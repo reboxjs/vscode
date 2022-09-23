@@ -11,12 +11,15 @@ import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle
 // --- other interested parties
 import { JSONValidationExtensionPoint } from 'vs/workbench/api/common/jsonValidationExtensionPoint';
 import { ColorExtensionPoint } from 'vs/workbench/services/themes/common/colorExtensionPoint';
+import { IconExtensionPoint } from 'vs/workbench/services/themes/common/iconExtensionPoint';
 import { TokenClassificationExtensionPoints } from 'vs/workbench/services/themes/common/tokenClassificationExtensionPoint';
 import { LanguageConfigurationFileHandler } from 'vs/workbench/contrib/codeEditor/browser/languageConfigurationExtensionPoint';
 
 // --- mainThread participants
+import './mainThreadLocalization';
 import './mainThreadBulkEdits';
 import './mainThreadCodeInsets';
+import './mainThreadCLICommands';
 import './mainThreadClipboard';
 import './mainThreadCommands';
 import './mainThreadConfiguration';
@@ -30,6 +33,7 @@ import './mainThreadDocuments';
 import './mainThreadDocumentsAndEditors';
 import './mainThreadEditor';
 import './mainThreadEditors';
+import './mainThreadEditorTabs';
 import './mainThreadErrors';
 import './mainThreadExtensionService';
 import './mainThreadFileSystem';
@@ -60,6 +64,10 @@ import './mainThreadWebviewManager';
 import './mainThreadWorkspace';
 import './mainThreadComments';
 import './mainThreadNotebook';
+import './mainThreadNotebookKernels';
+import './mainThreadNotebookDocumentsAndEditors';
+import './mainThreadNotebookRenderers';
+import './mainThreadInteractive';
 import './mainThreadTask';
 import './mainThreadLabelService';
 import './mainThreadTunnelService';
@@ -67,7 +75,6 @@ import './mainThreadAuthentication';
 import './mainThreadTimeline';
 import './mainThreadTesting';
 import './mainThreadSecretState';
-import 'vs/workbench/api/common/apiCommands';
 
 export class ExtensionPoints implements IWorkbenchContribution {
 
@@ -77,9 +84,10 @@ export class ExtensionPoints implements IWorkbenchContribution {
 		// Classes that handle extension points...
 		this.instantiationService.createInstance(JSONValidationExtensionPoint);
 		this.instantiationService.createInstance(ColorExtensionPoint);
+		this.instantiationService.createInstance(IconExtensionPoint);
 		this.instantiationService.createInstance(TokenClassificationExtensionPoints);
 		this.instantiationService.createInstance(LanguageConfigurationFileHandler);
 	}
 }
 
-Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(ExtensionPoints, LifecyclePhase.Starting);
+Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).registerWorkbenchContribution(ExtensionPoints, 'ExtensionPoints', LifecyclePhase.Starting);

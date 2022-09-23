@@ -5,7 +5,7 @@
 		"errorForeground": "#a92049",
 		"input.background": "#001733",
 		"dropdown.background": "#001733",
-		"list.focusBackground": "#ffffff60",
+		"quickInputList.focusBackground": "#ffffff60",
 		"list.activeSelectionBackground": "#ffffff60",
 		"list.inactiveSelectionBackground": "#ffffff40",
 		"list.hoverBackground": "#ffffff30",
@@ -15,8 +15,8 @@
 		"editor.foreground": "#ffffff",
 		"editor.selectionBackground": "#003f8e",
 		"minimap.selectionHighlight": "#003f8e",
-        "editor.lineHighlightBackground": "#00346e",
-        "editorLineNumber.activeForeground": "#949494",
+		"editor.lineHighlightBackground": "#00346e",
+		"editorLineNumber.activeForeground": "#949494",
 		"editorCursor.foreground": "#ffffff",
 		"editorWhitespace.foreground": "#404f7d",
 		"editorWidget.background": "#001c40",
@@ -32,6 +32,7 @@
 		"titleBar.activeBackground": "#001126",
 		"statusBar.background": "#001126",
 		"statusBarItem.remoteBackground": "#0e639c",
+		"ports.iconRunningProcessForeground": "#bbdaff",
 		"statusBar.noFolderBackground": "#001126",
 		"statusBar.debuggingBackground": "#001126",
 		"activityBar.background": "#001733",
@@ -64,7 +65,12 @@
 			}
 		},
 		{
-			"scope": ["meta.embedded", "source.groovy.embedded"],
+			"scope": [
+				"meta.embedded",
+				"source.groovy.embedded",
+				"meta.jsx.children",
+				"string meta.image.inline.markdown"
+			],
 			"settings": {
 				//"background": "#002451",
 				"foreground": "#FFFFFF"
@@ -234,6 +240,12 @@
 			"scope": "markup.italic",
 			"settings": {
 				"fontStyle": "italic"
+			}
+		},
+		{
+			"scope": "markup.strikethrough",
+			"settings": {
+				"fontStyle": "strikethrough"
 			}
 		},
 		{

@@ -12,20 +12,20 @@ import { $, append, clearNode } from 'vs/base/browser/dom';
 import { attachStylerCallback } from 'vs/platform/theme/common/styler';
 import { buttonBackground, buttonForeground, editorBackground, editorForeground, contrastBorder } from 'vs/platform/theme/common/colorRegistry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IHostService } from 'vs/workbench/services/host/browser/host';
-import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
-import { hasWorkspaceFileExtension } from 'vs/platform/workspaces/common/workspaces';
-import { Disposable, DisposableStore, dispose } from 'vs/base/common/lifecycle';
-import { localize } from 'vs/nls';
+import { Disposable, DisposableStore } from 'vs/base/common/lifecycle';
 import { IEditorContribution } from 'vs/editor/common/editorCommon';
 import { isEqual } from 'vs/base/common/resources';
-import { IFileService } from 'vs/platform/files/common/files';
 import { URI } from 'vs/base/common/uri';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { IRange } from 'vs/editor/common/core/range';
-import { CursorChangeReason, ICursorPositionChangedEvent } from 'vs/editor/common/controller/cursorEvents';
+import { CursorChangeReason, ICursorPositionChangedEvent } from 'vs/editor/common/cursorEvents';
 import { ModelDecorationOptions } from 'vs/editor/common/model/textModel';
 import { TrackedRangeStickiness, IModelDecorationsChangeAccessor } from 'vs/editor/common/model';
+import { EditorOption } from 'vs/editor/common/config/editorOptions';
+import { IMenuService, MenuId } from 'vs/platform/actions/common/actions';
+import { createAndFillInActionBarActions } from 'vs/platform/actions/browser/menuEntryActionViewItem';
+import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
+import { IAction } from 'vs/base/common/actions';
 
 export interface IRangeHighlightDecoration {
 	resource: URI;
@@ -47,8 +47,11 @@ export class RangeHighlightDecorations extends Disposable {
 	}
 
 	removeHighlightRange() {
-		if (this.editor && this.editor.getModel() && this.rangeHighlightDecorationId) {
-			this.editor.deltaDecorations([this.rangeHighlightDecorationId], []);
+		if (this.editor && this.rangeHighlightDecorationId) {
+			const decorationId = this.rangeHighlightDecorationId;
+			this.editor.changeDecorations((accessor) => {
+				accessor.removeDecoration(decorationId);
+			});
 			this._onHighlightRemoved.fire();
 		}
 
@@ -75,10 +78,9 @@ export class RangeHighlightDecorations extends Disposable {
 	}
 
 	private getEditor(resourceRange: IRangeHighlightDecoration): ICodeEditor | undefined {
-		const activeEditor = this.editorService.activeEditor;
-		const resource = activeEditor && activeEditor.resource;
-		if (resource && isEqual(resource, resourceRange.resource)) {
-			return this.editorService.activeTextEditorControl as ICodeEditor;
+		const resource = this.editorService.activeEditor?.resource;
+		if (resource && isEqual(resource, resourceRange.resource) && isCodeEditor(this.editorService.activeTextEditorControl)) {
+			return this.editorService.activeTextEditorControl;
 		}
 
 		return undefined;
@@ -107,12 +109,14 @@ export class RangeHighlightDecorations extends Disposable {
 	}
 
 	private static readonly _WHOLE_LINE_RANGE_HIGHLIGHT = ModelDecorationOptions.register({
+		description: 'codeeditor-range-highlight-whole',
 		stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
 		className: 'rangeHighlight',
 		isWholeLine: true
 	});
 
 	private static readonly _RANGE_HIGHLIGHT = ModelDecorationOptions.register({
+		description: 'codeeditor-range-highlight',
 		stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
 		className: 'rangeHighlight'
 	});
@@ -121,10 +125,10 @@ export class RangeHighlightDecorations extends Disposable {
 		return (isWholeLine ? RangeHighlightDecorations._WHOLE_LINE_RANGE_HIGHLIGHT : RangeHighlightDecorations._RANGE_HIGHLIGHT);
 	}
 
-	dispose() {
+	override dispose() {
 		super.dispose();
 
-		if (this.editor && this.editor.getModel()) {
+		if (this.editor?.getModel()) {
 			this.removeHighlightRange();
 			this.editor = null;
 		}
@@ -148,7 +152,8 @@ export class FloatingClickWidget extends Widget implements IOverlayWidget {
 		super();
 
 		this._domNode = $('.floating-click-widget');
-		this._domNode.style.padding = '10px';
+		this._domNode.style.padding = '6px 11px';
+		this._domNode.style.borderRadius = '2px';
 		this._domNode.style.cursor = 'pointer';
 
 		if (keyBindingAction) {
@@ -200,95 +205,47 @@ export class FloatingClickWidget extends Widget implements IOverlayWidget {
 		this.editor.addOverlayWidget(this);
 	}
 
-	dispose(): void {
+	override dispose(): void {
 		this.editor.removeOverlayWidget(this);
 
 		super.dispose();
 	}
 }
 
-export class OpenWorkspaceButtonContribution extends Disposable implements IEditorContribution {
+export class FloatingClickMenu extends Disposable implements IEditorContribution {
 
-	static get(editor: ICodeEditor): OpenWorkspaceButtonContribution {
-		return editor.getContribution<OpenWorkspaceButtonContribution>(OpenWorkspaceButtonContribution.ID);
-	}
-
-	public static readonly ID = 'editor.contrib.openWorkspaceButton';
-
-	private openWorkspaceButton: FloatingClickWidget | undefined;
+	static readonly ID = 'editor.contrib.floatingClickMenu';
 
 	constructor(
-		private editor: ICodeEditor,
-		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IHostService private readonly hostService: IHostService,
-		@IWorkspaceContextService private readonly contextService: IWorkspaceContextService,
-		@IFileService private readonly fileService: IFileService
+		editor: ICodeEditor,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IMenuService menuService: IMenuService,
+		@IContextKeyService contextKeyService: IContextKeyService
 	) {
 		super();
 
-		this.update();
-		this.registerListeners();
-	}
-
-	private registerListeners(): void {
-		this._register(this.editor.onDidChangeModel(e => this.update()));
-	}
-
-	private update(): void {
-		if (!this.shouldShowButton(this.editor)) {
-			this.disposeOpenWorkspaceWidgetRenderer();
-			return;
-		}
-
-		this.createOpenWorkspaceWidgetRenderer();
-	}
-
-	private shouldShowButton(editor: ICodeEditor): boolean {
-		const model = editor.getModel();
-		if (!model) {
-			return false; // we need a model
-		}
-
-		if (!hasWorkspaceFileExtension(model.uri)) {
-			return false; // we need a workspace file
-		}
-
-		if (!this.fileService.canHandleResource(model.uri)) {
-			return false; // needs to be backed by a file service
-		}
-
-		if (this.contextService.getWorkbenchState() === WorkbenchState.WORKSPACE) {
-			const workspaceConfiguration = this.contextService.getWorkspace().configuration;
-			if (workspaceConfiguration && isEqual(workspaceConfiguration, model.uri)) {
-				return false; // already inside workspace
+		const menu = menuService.createMenu(MenuId.EditorContent, contextKeyService);
+		const menuDisposables = new DisposableStore();
+		const renderMenuAsFloatingClickBtn = () => {
+			menuDisposables.clear();
+			if (!editor.hasModel() || editor.getOption(EditorOption.inDiffEditor)) {
+				return;
 			}
-		}
-
-		return true;
-	}
-
-	private createOpenWorkspaceWidgetRenderer(): void {
-		if (!this.openWorkspaceButton) {
-			this.openWorkspaceButton = this.instantiationService.createInstance(FloatingClickWidget, this.editor, localize('openWorkspace', "Open Workspace"), null);
-			this._register(this.openWorkspaceButton.onClick(() => {
-				const model = this.editor.getModel();
-				if (model) {
-					this.hostService.openWindow([{ workspaceUri: model.uri }]);
-				}
-			}));
-
-			this.openWorkspaceButton.render();
-		}
-	}
-
-	private disposeOpenWorkspaceWidgetRenderer(): void {
-		dispose(this.openWorkspaceButton);
-		this.openWorkspaceButton = undefined;
-	}
-
-	dispose(): void {
-		this.disposeOpenWorkspaceWidgetRenderer();
-
-		super.dispose();
+			const actions: IAction[] = [];
+			createAndFillInActionBarActions(menu, { renderShortTitle: true, shouldForwardArgs: true }, actions);
+			if (actions.length === 0) {
+				return;
+			}
+			// todo@jrieken find a way to handle N actions, like showing a context menu
+			const [first] = actions;
+			const widget = instantiationService.createInstance(FloatingClickWidget, editor, first.label, first.id);
+			menuDisposables.add(widget);
+			menuDisposables.add(widget.onClick(() => first.run(editor.getModel().uri)));
+			widget.render();
+		};
+		this._store.add(menu);
+		this._store.add(menuDisposables);
+		this._store.add(menu.onDidChange(renderMenuAsFloatingClickBtn));
+		renderMenuAsFloatingClickBtn();
 	}
 }

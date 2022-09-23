@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as filters from 'vs/base/common/filters';
-import { data } from './filters.perf.data';
+import { data } from 'vs/base/test/common/filters.perf.data';
 
 const patterns = ['cci', 'ida', 'pos', 'CCI', 'enbled', 'callback', 'gGame', 'cons', 'zyx', 'aBc'];
 
@@ -17,6 +17,9 @@ function perfSuite(name: string, callback: (this: Mocha.Suite) => void) {
 
 perfSuite('Performance - fuzzyMatch', function () {
 
+	// suiteSetup(() => console.profile());
+	// suiteTeardown(() => console.profileEnd());
+
 	console.log(`Matching ${data.length} items against ${patterns.length} patterns (${data.length * patterns.length} operations) `);
 
 	function perfTest(name: string, match: filters.FuzzyScorer) {
@@ -29,7 +32,7 @@ perfSuite('Performance - fuzzyMatch', function () {
 					const patternLow = pattern.toLowerCase();
 					for (const item of data) {
 						count += 1;
-						match(pattern, patternLow, 0, item, item.toLowerCase(), 0, false);
+						match(pattern, patternLow, 0, item, item.toLowerCase(), 0);
 					}
 				}
 			}

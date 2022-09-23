@@ -3,39 +3,35 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
+import { IAction } from 'vs/base/common/actions';
+import { DisposableStore, dispose, IDisposable } from 'vs/base/common/lifecycle';
 import 'vs/css!./media/debugViewlet';
 import * as nls from 'vs/nls';
-import { IAction, IActionViewItem } from 'vs/base/common/actions';
-import { IDebugService, VIEWLET_ID, State, BREAKPOINTS_VIEW_ID, CONTEXT_DEBUG_UX, CONTEXT_DEBUG_UX_KEY, REPL_VIEW_ID, CONTEXT_DEBUG_STATE, ILaunch, getStateLabel, CONTEXT_DEBUGGERS_AVAILABLE } from 'vs/workbench/contrib/debug/common/debug';
-import { StartDebugActionViewItem, FocusSessionActionViewItem } from 'vs/workbench/contrib/debug/browser/debugActionViewItems';
-import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { IProgressService } from 'vs/platform/progress/common/progress';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { IStorageService } from 'vs/platform/storage/common/storage';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { IContextMenuService, IContextViewService } from 'vs/platform/contextview/browser/contextView';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
+import { createActionViewItem } from 'vs/platform/actions/browser/menuEntryActionViewItem';
+import { Action2, MenuId, MenuItemAction, MenuRegistry, registerAction2 } from 'vs/platform/actions/common/actions';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ViewPaneContainer, ViewsSubMenu } from 'vs/workbench/browser/parts/views/viewPaneContainer';
-import { ViewPane } from 'vs/workbench/browser/parts/views/viewPane';
-import { MenuId, MenuItemAction, SubmenuItemAction, registerAction2, Action2, MenuRegistry } from 'vs/platform/actions/common/actions';
-import { IContextKeyService, ContextKeyEqualsExpr, ContextKeyExpr, ContextKeyDefinedExpr } from 'vs/platform/contextkey/common/contextkey';
-import { MenuEntryActionViewItem, SubmenuEntryActionViewItem } from 'vs/platform/actions/browser/menuEntryActionViewItem';
-import { IViewDescriptorService } from 'vs/workbench/common/views';
-import { WelcomeView } from 'vs/workbench/contrib/debug/browser/welcomeView';
-import { ShowViewletAction } from 'vs/workbench/browser/viewlet';
-import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { IEditorGroupsService } from 'vs/workbench/services/editor/common/editorGroupsService';
-import { debugConfigure, debugConsole } from 'vs/workbench/contrib/debug/browser/debugIcons';
-import { WorkbenchStateContext } from 'vs/workbench/browser/contextkeys';
+import { ContextKeyExpr, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
+import { IContextMenuService, IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
+import { IProgressService } from 'vs/platform/progress/common/progress';
 import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
-import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
-import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { ToggleViewAction } from 'vs/workbench/browser/actions/layoutActions';
-import { FOCUS_SESSION_ID, SELECT_AND_START_ID, DEBUG_CONFIGURE_COMMAND_ID, DEBUG_CONFIGURE_LABEL, DEBUG_START_LABEL, DEBUG_START_COMMAND_ID } from 'vs/workbench/contrib/debug/browser/debugCommands';
+import { IStorageService } from 'vs/platform/storage/common/storage';
+import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
+import { IThemeService } from 'vs/platform/theme/common/themeService';
+import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
+import { ViewPane } from 'vs/workbench/browser/parts/views/viewPane';
+import { ViewPaneContainer, ViewsSubMenu } from 'vs/workbench/browser/parts/views/viewPaneContainer';
+import { WorkbenchStateContext } from 'vs/workbench/common/contextkeys';
+import { IViewDescriptorService, IViewsService } from 'vs/workbench/common/views';
+import { FocusSessionActionViewItem, StartDebugActionViewItem } from 'vs/workbench/contrib/debug/browser/debugActionViewItems';
+import { DEBUG_CONFIGURE_COMMAND_ID, DEBUG_CONFIGURE_LABEL, DEBUG_START_COMMAND_ID, DEBUG_START_LABEL, DISCONNECT_ID, FOCUS_SESSION_ID, SELECT_AND_START_ID, STOP_ID } from 'vs/workbench/contrib/debug/browser/debugCommands';
+import { debugConfigure } from 'vs/workbench/contrib/debug/browser/debugIcons';
+import { createDisconnectMenuItemAction } from 'vs/workbench/contrib/debug/browser/debugToolBar';
+import { WelcomeView } from 'vs/workbench/contrib/debug/browser/welcomeView';
+import { BREAKPOINTS_VIEW_ID, CONTEXT_DEBUGGERS_AVAILABLE, CONTEXT_DEBUG_STATE, CONTEXT_DEBUG_UX, CONTEXT_DEBUG_UX_KEY, getStateLabel, IDebugService, ILaunch, REPL_VIEW_ID, State, VIEWLET_ID } from 'vs/workbench/contrib/debug/common/debug';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
 
 export class DebugViewPaneContainer extends ViewPaneContainer {
 
@@ -43,6 +39,8 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 	private progressResolve: (() => void) | undefined;
 	private breakpointView: ViewPane | undefined;
 	private paneListeners = new Map<string, IDisposable>();
+
+	private readonly stopActionViewItemDisposables = this._register(new DisposableStore());
 
 	constructor(
 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
@@ -58,7 +56,7 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		@IConfigurationService configurationService: IConfigurationService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@IViewDescriptorService viewDescriptorService: IViewDescriptorService
+		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 	) {
 		super(VIEWLET_ID, { mergeViewWithContainerWhenSingleView: true }, instantiationService, configurationService, layoutService, contextMenuService, telemetryService, extensionService, themeService, storageService, contextService, viewDescriptorService);
 
@@ -79,12 +77,12 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		}));
 	}
 
-	create(parent: HTMLElement): void {
+	override create(parent: HTMLElement): void {
 		super.create(parent);
 		parent.classList.add('debug-viewlet');
 	}
 
-	focus(): void {
+	override focus(): void {
 		super.focus();
 
 		if (this.startDebugActionViewItem) {
@@ -94,7 +92,7 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		}
 	}
 
-	getActionViewItem(action: IAction): IActionViewItem | undefined {
+	override getActionViewItem(action: IAction): IActionViewItem | undefined {
 		if (action.id === DEBUG_START_COMMAND_ID) {
 			this.startDebugActionViewItem = this.instantiationService.createInstance(StartDebugActionViewItem, null, action);
 			return this.startDebugActionViewItem;
@@ -102,13 +100,16 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		if (action.id === FOCUS_SESSION_ID) {
 			return new FocusSessionActionViewItem(action, undefined, this.debugService, this.themeService, this.contextViewService, this.configurationService);
 		}
-		if (action instanceof MenuItemAction) {
-			return this.instantiationService.createInstance(MenuEntryActionViewItem, action);
-		} else if (action instanceof SubmenuItemAction) {
-			return this.instantiationService.createInstance(SubmenuEntryActionViewItem, action);
+
+		if (action.id === STOP_ID || action.id === DISCONNECT_ID) {
+			this.stopActionViewItemDisposables.clear();
+			const item = this.instantiationService.invokeFunction(accessor => createDisconnectMenuItemAction(action as MenuItemAction, this.stopActionViewItemDisposables, accessor));
+			if (item) {
+				return item;
+			}
 		}
 
-		return undefined;
+		return createActionViewItem(this.instantiationService, action);
 	}
 
 	focusView(id: string): void {
@@ -131,7 +132,7 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		}
 	}
 
-	addPanes(panes: { pane: ViewPane, size: number, index?: number }[]): void {
+	override addPanes(panes: { pane: ViewPane; size: number; index?: number }[]): void {
 		super.addPanes(panes);
 
 		for (const { pane: pane } of panes) {
@@ -145,7 +146,7 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 		}
 	}
 
-	removePanes(panes: ViewPane[]): void {
+	override removePanes(panes: ViewPane[]): void {
 		super.removePanes(panes);
 		for (const pane of panes) {
 			dispose(this.paneListeners.get(pane.id));
@@ -162,23 +163,8 @@ export class DebugViewPaneContainer extends ViewPaneContainer {
 	}
 }
 
-export class OpenDebugViewletAction extends ShowViewletAction {
-	public static readonly ID = VIEWLET_ID;
-	public static readonly LABEL = nls.localize('toggleDebugViewlet', "Show Run and Debug");
-
-	constructor(
-		id: string,
-		label: string,
-		@IViewletService viewletService: IViewletService,
-		@IEditorGroupsService editorGroupService: IEditorGroupsService,
-		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService
-	) {
-		super(id, label, VIEWLET_ID, viewletService, editorGroupService, layoutService);
-	}
-}
-
 MenuRegistry.appendMenuItem(MenuId.ViewContainerTitle, {
-	when: ContextKeyExpr.and(ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_UX.notEqualsTo('simple'), WorkbenchStateContext.notEqualsTo('empty'),
+	when: ContextKeyExpr.and(ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_UX.notEqualsTo('simple'), WorkbenchStateContext.notEqualsTo('empty'),
 		ContextKeyExpr.or(CONTEXT_DEBUG_STATE.isEqualTo('inactive'), ContextKeyExpr.notEquals('config.debug.toolBarLocation', 'docked'))),
 	order: 10,
 	group: 'navigation',
@@ -195,7 +181,7 @@ registerAction2(class extends Action2 {
 			id: DEBUG_CONFIGURE_COMMAND_ID,
 			title: {
 				value: DEBUG_CONFIGURE_LABEL,
-				original: DEBUG_CONFIGURE_LABEL,
+				original: 'Open \'launch.json\'',
 				mnemonicTitle: nls.localize({ key: 'miOpenConfigurations', comment: ['&& denotes a mnemonic'] }, "Open &&Configurations")
 			},
 			f1: true,
@@ -205,13 +191,13 @@ registerAction2(class extends Action2 {
 				id: MenuId.ViewContainerTitle,
 				group: 'navigation',
 				order: 20,
-				when: ContextKeyExpr.and(ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_UX.notEqualsTo('simple'), WorkbenchStateContext.notEqualsTo('empty'),
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_UX.notEqualsTo('simple'), WorkbenchStateContext.notEqualsTo('empty'),
 					ContextKeyExpr.or(CONTEXT_DEBUG_STATE.isEqualTo('inactive'), ContextKeyExpr.notEquals('config.debug.toolBarLocation', 'docked')))
 			}, {
 				id: MenuId.ViewContainerTitle,
 				order: 20,
 				// Show in debug viewlet secondary actions when debugging and debug toolbar is docked
-				when: ContextKeyExpr.and(ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked'))
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked'))
 			}, {
 				id: MenuId.MenubarDebugMenu,
 				group: '2_configuration',
@@ -234,7 +220,7 @@ registerAction2(class extends Action2 {
 				launch = launches[0];
 			} else {
 				const picks = launches.map(l => ({ label: l.name, launch: l }));
-				const picked = await quickInputService.pick<{ label: string, launch: ILaunch }>(picks, {
+				const picked = await quickInputService.pick<{ label: string; launch: ILaunch }>(picks, {
 					activeItem: picks[0],
 					placeHolder: nls.localize({ key: 'selectWorkspaceFolder', comment: ['User picks a workspace folder or a workspace configuration file here. Workspace configuration files can contain settings and thus a launch.json configuration can be written into one.'] }, "Select a workspace folder to create a launch.json file in or add it to the workspace config file")
 				});
@@ -245,47 +231,39 @@ registerAction2(class extends Action2 {
 		}
 
 		if (launch) {
-			await launch.openConfigFile(false);
+			await launch.openConfigFile({ preserveFocus: false });
 		}
 	}
 });
 
-export const OPEN_REPL_COMMAND_ID = 'workbench.debug.action.toggleRepl';
+
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
-			id: OPEN_REPL_COMMAND_ID,
-			title: {
-				value: nls.localize('debugPanel', "Debug Console"),
-				original: 'Debug Console',
-				mnemonicTitle: nls.localize({ key: 'miToggleDebugConsole', comment: ['&& denotes a mnemonic'] }, "De&&bug Console")
-			},
-			f1: true,
-			keybinding: {
-				primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_Y,
-				weight: KeybindingWeight.WorkbenchContrib
-			},
-			toggled: ContextKeyDefinedExpr.create(`view.${REPL_VIEW_ID}.visible`),
-			icon: debugConsole,
+			id: 'debug.toggleReplIgnoreFocus',
+			title: nls.localize('debugPanel', "Debug Console"),
+			toggled: ContextKeyExpr.has(`view.${REPL_VIEW_ID}.visible`),
 			menu: [{
 				id: ViewsSubMenu,
+				group: '3_toggleRepl',
 				order: 30,
-				when: ContextKeyExpr.and(ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID))
-			}, {
-				id: MenuId.MenubarViewMenu,
-				group: '4_panels',
-				order: 2
+				when: ContextKeyExpr.and(ContextKeyExpr.equals('viewContainer', VIEWLET_ID))
 			}]
 		});
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		return accessor.get(IInstantiationService).createInstance(ToggleViewAction, OPEN_REPL_COMMAND_ID, 'Debug Console', REPL_VIEW_ID).run();
+		const viewsService = accessor.get(IViewsService);
+		if (viewsService.isViewVisible(REPL_VIEW_ID)) {
+			viewsService.closeView(REPL_VIEW_ID);
+		} else {
+			await viewsService.openView(REPL_VIEW_ID);
+		}
 	}
 });
 
 MenuRegistry.appendMenuItem(MenuId.ViewContainerTitle, {
-	when: ContextKeyExpr.and(ContextKeyEqualsExpr.create('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked')),
+	when: ContextKeyExpr.and(ContextKeyExpr.equals('viewContainer', VIEWLET_ID), CONTEXT_DEBUG_STATE.notEqualsTo('inactive'), ContextKeyExpr.equals('config.debug.toolBarLocation', 'docked')),
 	order: 10,
 	command: {
 		id: SELECT_AND_START_ID,

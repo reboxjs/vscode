@@ -22,7 +22,7 @@ const localize = nls.loadMessageBundle();
 
 
 interface DidApplyRefactoringCommand_Args {
-	readonly codeAction: InlinedCodeAction
+	readonly codeAction: InlinedCodeAction;
 }
 
 class DidApplyRefactoringCommand implements Command {
@@ -36,6 +36,7 @@ class DidApplyRefactoringCommand implements Command {
 	public async execute(args: DidApplyRefactoringCommand_Args): Promise<void> {
 		/* __GDPR__
 			"refactor.execute" : {
+				"owner": "mjbvz",
 				"action" : { "classification": "PublicNonPersonalData", "purpose": "FeatureInsight" },
 				"${include}": [
 					"${TypeScriptCommonProperties}"
@@ -134,7 +135,7 @@ const Extract_Interface = Object.freeze<CodeActionKind>({
 });
 
 const Move_NewFile = Object.freeze<CodeActionKind>({
-	kind: vscode.CodeActionKind.Refactor.append('move').append('newFile'),
+	kind: vscode.CodeActionKind.RefactorMove.append('newFile'),
 	matches: refactor => refactor.name.startsWith('Move to a new file')
 });
 
@@ -284,7 +285,7 @@ class TypeScriptRefactorProvider implements vscode.CodeActionProvider<TsCodeActi
 		context: vscode.CodeActionContext,
 		token: vscode.CancellationToken
 	): Promise<TsCodeAction[] | undefined> {
-		if (!this.shouldTrigger(rangeOrSelection, context)) {
+		if (!this.shouldTrigger(context, rangeOrSelection)) {
 			return undefined;
 		}
 		if (!this.client.toOpenedFilePath(document)) {
@@ -309,7 +310,17 @@ class TypeScriptRefactorProvider implements vscode.CodeActionProvider<TsCodeActi
 			return undefined;
 		}
 
-		const actions = this.convertApplicableRefactors(response.body, document, rangeOrSelection);
+		const actions = this.convertApplicableRefactors(response.body, document, rangeOrSelection).filter(action => {
+			if (this.client.apiVersion.lt(API.v430)) {
+				// Don't show 'infer return type' refactoring unless it has been explicitly requested
+				// https://github.com/microsoft/TypeScript/issues/42993
+				if (!context.only && action.kind?.value === 'refactor.rewrite.function.returnType') {
+					return false;
+				}
+			}
+			return true;
+		});
+
 		if (!context.only) {
 			return actions;
 		}
@@ -327,10 +338,10 @@ class TypeScriptRefactorProvider implements vscode.CodeActionProvider<TsCodeActi
 	}
 
 	private toTsTriggerReason(context: vscode.CodeActionContext): Proto.RefactorTriggerReason | undefined {
-		if (!context.only) {
-			return;
+		if (context.triggerKind === vscode.CodeActionTriggerKind.Invoke) {
+			return 'invoked';
 		}
-		return 'invoked';
+		return undefined;
 	}
 
 	private convertApplicableRefactors(
@@ -376,11 +387,13 @@ class TypeScriptRefactorProvider implements vscode.CodeActionProvider<TsCodeActi
 		return codeAction;
 	}
 
-	private shouldTrigger(rangeOrSelection: vscode.Range | vscode.Selection, context: vscode.CodeActionContext) {
+	private shouldTrigger(context: vscode.CodeActionContext, rangeOrSelection: vscode.Range | vscode.Selection) {
 		if (context.only && !vscode.CodeActionKind.Refactor.contains(context.only)) {
 			return false;
 		}
-
+		if (context.triggerKind === vscode.CodeActionTriggerKind.Invoke) {
+			return true;
+		}
 		return rangeOrSelection instanceof vscode.Selection;
 	}
 

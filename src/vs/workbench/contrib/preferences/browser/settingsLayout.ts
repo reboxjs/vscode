@@ -7,6 +7,7 @@ import { localize } from 'vs/nls';
 export interface ITOCEntry<T> {
 	id: string;
 	label: string;
+	order?: number;
 	children?: ITOCEntry<T>[];
 	settings?: Array<T>;
 }
@@ -138,8 +139,13 @@ export const tocData: ITOCEntry<string> = {
 					settings: ['debug.*', 'launch']
 				},
 				{
+					id: 'features/testing',
+					label: localize('testing', "Testing"),
+					settings: ['testing.*']
+				},
+				{
 					id: 'features/scm',
-					label: localize('scm', "SCM"),
+					label: localize('scm', "Source Control"),
 					settings: ['scm.*']
 				},
 				{
@@ -185,7 +191,17 @@ export const tocData: ITOCEntry<string> = {
 				{
 					id: 'features/notebook',
 					label: localize('notebook', 'Notebook'),
-					settings: ['notebook.*']
+					settings: ['notebook.*', 'interactiveWindow.*']
+				},
+				{
+					id: 'features/audioCues',
+					label: localize('audioCues', 'Audio Cues'),
+					settings: ['audioCues.*']
+				},
+				{
+					id: 'features/mergeEditor',
+					label: localize('mergeEditor', 'Merge Editor'),
+					settings: ['mergeEditor.*']
 				}
 			]
 		},
@@ -217,6 +233,17 @@ export const tocData: ITOCEntry<string> = {
 					id: 'application/settingsSync',
 					label: localize('settingsSync', "Settings Sync"),
 					settings: ['settingsSync.*']
+				}
+			]
+		},
+		{
+			id: 'security',
+			label: localize('security', "Security"),
+			children: [
+				{
+					id: 'security/workspace',
+					label: localize('workspace', "Workspace"),
+					settings: ['security.workspace.*']
 				}
 			]
 		}

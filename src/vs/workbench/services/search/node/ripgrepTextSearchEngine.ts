@@ -11,16 +11,16 @@ import { CancellationToken } from 'vs/base/common/cancellation';
 import { groupBy } from 'vs/base/common/collections';
 import { splitGlobAware } from 'vs/base/common/glob';
 import * as path from 'vs/base/common/path';
-import { createRegExp, escapeRegExpCharacters, startsWithUTF8BOM, stripUTF8BOM } from 'vs/base/common/strings';
+import { createRegExp, escapeRegExpCharacters } from 'vs/base/common/strings';
 import { URI } from 'vs/base/common/uri';
 import { Progress } from 'vs/platform/progress/common/progress';
 import { IExtendedExtensionSearchOptions, SearchError, SearchErrorCode, serializeSearchError } from 'vs/workbench/services/search/common/search';
 import { Range, TextSearchComplete, TextSearchContext, TextSearchMatch, TextSearchOptions, TextSearchPreviewOptions, TextSearchQuery, TextSearchResult } from 'vs/workbench/services/search/common/searchExtTypes';
-import { RegExpParser, RegExpVisitor, AST as ReAST } from 'vscode-regexpp';
-import { rgPath } from 'vscode-ripgrep';
+import { AST as ReAST, RegExpParser, RegExpVisitor } from 'vscode-regexpp';
+import { rgPath } from '@vscode/ripgrep';
 import { anchorGlob, createTextSearchResult, IOutputChannel, Maybe } from './ripgrepSearchUtils';
 
-// If vscode-ripgrep is in an .asar file, then the binary is unpacked.
+// If @vscode/ripgrep is in an .asar file, then the binary is unpacked.
 const rgDiskPath = rgPath.replace(/\bnode_modules\.asar\b/, 'node_modules.asar.unpacked');
 
 export class RipgrepTextSearchEngine {
@@ -66,13 +66,9 @@ export class RipgrepTextSearchEngine {
 			const cancel = () => {
 				isDone = true;
 
-				if (rgProc) {
-					rgProc.kill();
-				}
+				rgProc?.kill();
 
-				if (ripgrepParser) {
-					ripgrepParser.cancel();
-				}
+				ripgrepParser?.cancel();
 			};
 
 			let limitHit = false;
@@ -96,7 +92,10 @@ export class RipgrepTextSearchEngine {
 			rgProc.stderr!.on('data', data => {
 				const message = data.toString();
 				this.outputChannel.appendLine(message);
-				stderr += message;
+
+				if (stderr.length + message.length < 1e6) {
+					stderr += message;
+				}
 			});
 
 			rgProc.on('close', () => {
@@ -199,9 +198,9 @@ export class RipgrepParser extends EventEmitter {
 	}
 
 
-	on(event: 'result', listener: (result: TextSearchResult) => void): this;
-	on(event: 'hitLimit', listener: () => void): this;
-	on(event: string, listener: (...args: any[]) => void): this {
+	override on(event: 'result', listener: (result: TextSearchResult) => void): this;
+	override on(event: 'hitLimit', listener: () => void): this;
+	override on(event: string, listener: (...args: any[]) => void): this {
 		super.on(event, listener);
 		return this;
 	}
@@ -272,12 +271,7 @@ export class RipgrepParser extends EventEmitter {
 
 	private createTextSearchMatch(data: IRgMatch, uri: URI): TextSearchMatch {
 		const lineNumber = data.line_number - 1;
-		let isBOMStripped = false;
-		let fullText = bytesOrTextToString(data.lines);
-		if (lineNumber === 0 && startsWithUTF8BOM(fullText)) {
-			isBOMStripped = true;
-			fullText = stripUTF8BOM(fullText);
-		}
+		const fullText = bytesOrTextToString(data.lines);
 		const fullTextBytes = Buffer.from(fullText);
 
 		let prevMatchEnd = 0;
@@ -306,17 +300,16 @@ export class RipgrepParser extends EventEmitter {
 				this.hitLimit = true;
 			}
 
-			let matchText = bytesOrTextToString(match.match);
-			if (lineNumber === 0 && i === 0 && isBOMStripped) {
-				matchText = stripUTF8BOM(matchText);
-				match.start = match.start <= 3 ? 0 : match.start - 3;
-				match.end = match.end <= 3 ? 0 : match.end - 3;
-			}
-			const inBetweenChars = fullTextBytes.slice(prevMatchEnd, match.start).toString().length;
-			const startCol = prevMatchEndCol + inBetweenChars;
+			const matchText = bytesOrTextToString(match.match);
+
+			const inBetweenText = fullTextBytes.slice(prevMatchEnd, match.start).toString();
+			const inBetweenStats = getNumLinesAndLastNewlineLength(inBetweenText);
+			const startCol = inBetweenStats.numLines > 0 ?
+				inBetweenStats.lastLineLength :
+				inBetweenStats.lastLineLength + prevMatchEndCol;
 
 			const stats = getNumLinesAndLastNewlineLength(matchText);
-			const startLineNumber = prevMatchEndLine;
+			const startLineNumber = inBetweenStats.numLines + prevMatchEndLine;
 			const endLineNumber = stats.numLines + startLineNumber;
 			const endCol = stats.numLines > 0 ?
 				stats.lastLineLength :
@@ -358,7 +351,7 @@ function bytesOrTextToString(obj: any): string {
 		obj.text;
 }
 
-function getNumLinesAndLastNewlineLength(text: string): { numLines: number, lastLineLength: number } {
+function getNumLinesAndLastNewlineLength(text: string): { numLines: number; lastLineLength: number } {
 	const re = /\n/g;
 	let numLines = 0;
 	let lastNewlineIdx = -1;
@@ -385,13 +378,7 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
 
 	if (otherIncludes && otherIncludes.length) {
 		const uniqueOthers = new Set<string>();
-		otherIncludes.forEach(other => {
-			if (!other.endsWith('/**')) {
-				other += '/**';
-			}
-
-			uniqueOthers.add(other);
-		});
+		otherIncludes.forEach(other => { uniqueOthers.add(other); });
 
 		args.push('-g', '!*');
 		uniqueOthers
@@ -419,7 +406,9 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
 	}
 
 	if (options.useIgnoreFiles) {
-		args.push('--no-ignore-parent');
+		if (!options.useParentIgnoreFiles) {
+			args.push('--no-ignore-parent');
+		}
 	} else {
 		// Don't use .gitignore or .ignore
 		args.push('--no-ignore');
@@ -454,7 +443,7 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
 
 	if (query.isRegExp) {
 		query.pattern = unicodeEscapesToPCRE2(query.pattern);
-		args.push('--auto-hybrid-regex');
+		args.push('--engine', 'auto');
 	}
 
 	let searchPatternAfterDoubleDashes: Maybe<string>;
@@ -508,10 +497,6 @@ function getRgArgs(query: TextSearchQuery, options: TextSearchOptions): string[]
  */
 export function spreadGlobComponents(globArg: string): string[] {
 	const components = splitGlobAware(globArg, '/');
-	if (components[components.length - 1] !== '**') {
-		components.push('**');
-	}
-
 	return components.map((_, i) => components.slice(0, i + 1).join('/'));
 }
 
@@ -586,9 +571,22 @@ export function fixRegexNewline(pattern: string): string {
 			} else if (context.some(isLookBehind)) {
 				// no-op in a lookbehind, see #100569
 			} else if (parent.type === 'CharacterClass') {
-				// in a bracket expr, [a-z\n] -> (?:[a-z]|\r?\n)
-				const otherContent = pattern.slice(parent.start + 1, char.start) + pattern.slice(char.end, parent.end - 1);
-				replace(parent.start, parent.end, otherContent === '' ? '\\r?\\n' : `(?:[${otherContent}]|\\r?\\n)`);
+				if (parent.negate) {
+					// negative bracket expr, [^a-z\n] -> (?![a-z]|\r?\n)
+					const otherContent = pattern.slice(parent.start + 2, char.start) + pattern.slice(char.end, parent.end - 1);
+					if (parent.parent?.type === 'Quantifier') {
+						// If quantified, we can't use a negative lookahead in a quantifier.
+						// But `.` already doesn't match new lines, so we can just use that
+						// (with any other negations) instead.
+						replace(parent.start, parent.end, otherContent ? `[^${otherContent}]` : '.');
+					} else {
+						replace(parent.start, parent.end, '(?!\\r?\\n' + (otherContent ? `|[${otherContent}]` : '') + ')');
+					}
+				} else {
+					// positive bracket expr, [a-z\n] -> (?:[a-z]|\r?\n)
+					const otherContent = pattern.slice(parent.start + 1, char.start) + pattern.slice(char.end, parent.end - 1);
+					replace(parent.start, parent.end, otherContent === '' ? '\\r?\\n' : `(?:[${otherContent}]|\\r?\\n)`);
+				}
 			} else if (parent.type === 'Quantifier') {
 				replace(char.start, char.end, '(?:\\r?\\n)');
 			}

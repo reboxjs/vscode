@@ -8,7 +8,7 @@ import * as nls from 'vscode-nls';
 import { Command, CommandManager } from '../commands/commandManager';
 import { ITypeScriptServiceClient } from '../typescriptService';
 import API from '../utils/api';
-import { isSupportedLanguageMode } from '../utils/languageModeIds';
+import { isSupportedLanguageMode } from '../utils/languageIds';
 import * as typeConverters from '../utils/typeConverters';
 
 const localize = nls.loadMessageBundle();
@@ -67,13 +67,13 @@ class FileReferencesCommand implements Command {
 				typeConverters.Location.fromTextSpan(this.client.toResource(reference.file), reference));
 
 			const config = vscode.workspace.getConfiguration('references');
-			const existingSetting = config.get('preferredLocation', undefined);
+			const existingSetting = config.inspect<string>('preferredLocation');
 
 			await config.update('preferredLocation', 'view');
 			try {
 				await vscode.commands.executeCommand('editor.action.showReferences', resource, new vscode.Position(0, 0), locations);
 			} finally {
-				await config.update('preferredLocation', existingSetting);
+				await config.update('preferredLocation', existingSetting?.workspaceFolderValue ?? existingSetting?.workspaceValue);
 			}
 		});
 	}

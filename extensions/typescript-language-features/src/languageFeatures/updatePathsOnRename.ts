@@ -11,7 +11,7 @@ import { ClientCapability, ITypeScriptServiceClient } from '../typescriptService
 import API from '../utils/api';
 import { Delayer } from '../utils/async';
 import { nulToken } from '../utils/cancellation';
-import { conditionalRegistration, requireSomeCapability, requireMinVersion } from '../utils/dependentRegistration';
+import { conditionalRegistration, requireMinVersion, requireSomeCapability } from '../utils/dependentRegistration';
 import { Disposable } from '../utils/dispose';
 import * as fileSchemes from '../utils/fileSchemes';
 import { doesResourceLookLikeATypeScriptFile } from '../utils/languageDescription';
@@ -114,7 +114,7 @@ class UpdateImportsOnFileRenameHandler extends Disposable {
 
 			if (edits.size) {
 				if (await this.confirmActionWithUser(resourcesBeingRenamed)) {
-					await vscode.workspace.applyEdit(edits);
+					await vscode.workspace.applyEdit(edits, { isRefactoring: true });
 				}
 			}
 		}
@@ -199,7 +199,7 @@ class UpdateImportsOnFileRenameHandler extends Disposable {
 					config.update(
 						updateImportsOnFileMoveName,
 						UpdateImportsOnFileMoveSetting.Always,
-						vscode.ConfigurationTarget.Global);
+						this.getConfigTargetScope(config, updateImportsOnFileMoveName));
 					return true;
 				}
 			case Choice.Never:
@@ -208,7 +208,7 @@ class UpdateImportsOnFileRenameHandler extends Disposable {
 					config.update(
 						updateImportsOnFileMoveName,
 						UpdateImportsOnFileMoveSetting.Never,
-						vscode.ConfigurationTarget.Global);
+						this.getConfigTargetScope(config, updateImportsOnFileMoveName));
 					return false;
 				}
 		}
@@ -222,10 +222,7 @@ class UpdateImportsOnFileRenameHandler extends Disposable {
 		}
 
 		if (await isDirectory(resource)) {
-			const files = await vscode.workspace.findFiles({
-				base: resource.fsPath,
-				pattern: '**/*.{ts,tsx,js,jsx}',
-			}, '**/node_modules/**', 1);
+			const files = await vscode.workspace.findFiles(new vscode.RelativePattern(resource, '**/*.{ts,tsx,js,jsx}'), '**/node_modules/**', 1);
 			return files[0];
 		}
 
@@ -286,6 +283,19 @@ class UpdateImportsOnFileRenameHandler extends Disposable {
 
 		paths.push('');
 		return paths.join('\n');
+	}
+
+	private getConfigTargetScope(config: vscode.WorkspaceConfiguration, settingsName: string): vscode.ConfigurationTarget {
+		const inspected = config.inspect(settingsName);
+		if (inspected?.workspaceFolderValue) {
+			return vscode.ConfigurationTarget.WorkspaceFolder;
+		}
+
+		if (inspected?.workspaceValue) {
+			return vscode.ConfigurationTarget.Workspace;
+		}
+
+		return vscode.ConfigurationTarget.Global;
 	}
 }
 

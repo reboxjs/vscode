@@ -9,7 +9,7 @@ import { Emitter, Event } from 'vs/base/common/event';
 import { createMatches, FuzzyScore } from 'vs/base/common/filters';
 import * as glob from 'vs/base/common/glob';
 import { IDisposable, DisposableStore, MutableDisposable, Disposable } from 'vs/base/common/lifecycle';
-import { posix } from 'vs/base/common/path';
+import { posix, relative } from 'vs/base/common/path';
 import { basename, dirname, isEqual } from 'vs/base/common/resources';
 import { URI } from 'vs/base/common/uri';
 import 'vs/css!./media/breadcrumbscontrol';
@@ -18,7 +18,7 @@ import { FileKind, IFileService, IFileStat } from 'vs/platform/files/common/file
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { WorkbenchDataTree, WorkbenchAsyncDataTree } from 'vs/platform/list/browser/listService';
 import { breadcrumbsPickerBackground, widgetShadow } from 'vs/platform/theme/common/colorRegistry';
-import { IWorkspace, IWorkspaceContextService, IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
+import { isWorkspace, isWorkspaceFolder, IWorkspace, IWorkspaceContextService, IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
 import { ResourceLabels, IResourceLabel, DEFAULT_LABELS_CONTAINER } from 'vs/workbench/browser/labels';
 import { BreadcrumbsConfig } from 'vs/workbench/browser/parts/editor/breadcrumbs';
 import { OutlineElement2, FileElement } from 'vs/workbench/browser/parts/editor/breadcrumbsModel';
@@ -30,8 +30,7 @@ import { localize } from 'vs/nls';
 import { IOutline, IOutlineComparator } from 'vs/workbench/services/outline/browser/outline';
 import { IEditorOptions } from 'vs/platform/editor/common/editor';
 import { IEditorService, SIDE_GROUP } from 'vs/workbench/services/editor/common/editorService';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfigurationService';
+import { ITextResourceConfigurationService } from 'vs/editor/common/services/textResourceConfiguration';
 
 interface ILayoutInfo {
 	maxHeight: number;
@@ -69,7 +68,6 @@ export abstract class BreadcrumbsPicker {
 		@IInstantiationService protected readonly _instantiationService: IInstantiationService,
 		@IThemeService protected readonly _themeService: IThemeService,
 		@IConfigurationService protected readonly _configurationService: IConfigurationService,
-		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 	) {
 		this._domNode = document.createElement('div');
 		this._domNode.className = 'monaco-breadcrumbs-picker show-file-icons';
@@ -109,10 +107,6 @@ export abstract class BreadcrumbsPicker {
 			if (!didReveal) {
 				return;
 			}
-			// send telemetry
-			interface OpenEvent { type: string }
-			interface OpenEventGDPR { type: { classification: 'SystemMetaData', purpose: 'FeatureInsight' } }
-			this._telemetryService.publicLog2<OpenEvent, OpenEventGDPR>('breadcrumbs/open', { type: element instanceof OutlineElement2 ? 'symbol' : 'file' });
 		}));
 		this._disposables.add(this._tree.onDidChangeFocus(e => {
 			this._previewDispoables.value = this._previewElement(e.elements[0]);
@@ -167,12 +161,12 @@ class FileVirtualDelegate implements IListVirtualDelegate<IFileStat | IWorkspace
 }
 
 class FileIdentityProvider implements IIdentityProvider<IWorkspace | IWorkspaceFolder | IFileStat | URI> {
-	getId(element: IWorkspace | IWorkspaceFolder | IFileStat | URI): { toString(): string; } {
+	getId(element: IWorkspace | IWorkspaceFolder | IFileStat | URI): { toString(): string } {
 		if (URI.isUri(element)) {
 			return element.toString();
-		} else if (IWorkspace.isIWorkspace(element)) {
+		} else if (isWorkspace(element)) {
 			return element.id;
-		} else if (IWorkspaceFolder.isIWorkspaceFolder(element)) {
+		} else if (isWorkspaceFolder(element)) {
 			return element.uri.toString();
 		} else {
 			return element.resource.toString();
@@ -189,17 +183,17 @@ class FileDataSource implements IAsyncDataSource<IWorkspace | URI, IWorkspaceFol
 
 	hasChildren(element: IWorkspace | URI | IWorkspaceFolder | IFileStat): boolean {
 		return URI.isUri(element)
-			|| IWorkspace.isIWorkspace(element)
-			|| IWorkspaceFolder.isIWorkspaceFolder(element)
+			|| isWorkspace(element)
+			|| isWorkspaceFolder(element)
 			|| element.isDirectory;
 	}
 
 	async getChildren(element: IWorkspace | URI | IWorkspaceFolder | IFileStat): Promise<(IWorkspaceFolder | IFileStat)[]> {
-		if (IWorkspace.isIWorkspace(element)) {
+		if (isWorkspace(element)) {
 			return element.folders;
 		}
 		let uri: URI;
-		if (IWorkspaceFolder.isIWorkspaceFolder(element)) {
+		if (isWorkspaceFolder(element)) {
 			uri = element.uri;
 		} else if (URI.isUri(element)) {
 			uri = element;
@@ -226,11 +220,11 @@ class FileRenderer implements ITreeRenderer<IFileStat | IWorkspaceFolder, FuzzyS
 	}
 
 	renderElement(node: ITreeNode<IWorkspaceFolder | IFileStat, [number, number, number]>, index: number, templateData: IResourceLabel): void {
-		const fileDecorations = this._configService.getValue<{ colors: boolean, badges: boolean; }>('explorer.decorations');
+		const fileDecorations = this._configService.getValue<{ colors: boolean; badges: boolean }>('explorer.decorations');
 		const { element } = node;
 		let resource: URI;
 		let fileKind: FileKind;
-		if (IWorkspaceFolder.isIWorkspaceFolder(element)) {
+		if (isWorkspaceFolder(element)) {
 			resource = element.uri;
 			fileKind = FileKind.ROOT_FOLDER;
 		} else {
@@ -253,7 +247,7 @@ class FileRenderer implements ITreeRenderer<IFileStat | IWorkspaceFolder, FuzzyS
 
 class FileNavigationLabelProvider implements IKeyboardNavigationLabelProvider<IWorkspaceFolder | IFileStat> {
 
-	getKeyboardNavigationLabel(element: IWorkspaceFolder | IFileStat): { toString(): string; } {
+	getKeyboardNavigationLabel(element: IWorkspaceFolder | IFileStat): { toString(): string } {
 		return element.name;
 	}
 }
@@ -292,7 +286,7 @@ class FileFilter implements ITreeFilter<IWorkspaceFolder | IFileStat> {
 					if (typeof excludesConfig[pattern] !== 'boolean') {
 						continue;
 					}
-					let patternAbs = pattern.indexOf('**/') !== 0
+					const patternAbs = pattern.indexOf('**/') !== 0
 						? posix.join(folder.uri.path, pattern)
 						: pattern;
 
@@ -312,7 +306,7 @@ class FileFilter implements ITreeFilter<IWorkspaceFolder | IFileStat> {
 	}
 
 	filter(element: IWorkspaceFolder | IFileStat, _parentVisibility: TreeVisibility): boolean {
-		if (IWorkspaceFolder.isIWorkspaceFolder(element)) {
+		if (isWorkspaceFolder(element)) {
 			// not a file
 			return true;
 		}
@@ -323,14 +317,14 @@ class FileFilter implements ITreeFilter<IWorkspaceFolder | IFileStat> {
 		}
 
 		const expression = this._cachedExpressions.get(folder.uri.toString())!;
-		return !expression(element.resource.path, basename(element.resource));
+		return !expression(relative(folder.uri.path, element.resource.path), basename(element.resource));
 	}
 }
 
 
 export class FileSorter implements ITreeSorter<IFileStat | IWorkspaceFolder> {
 	compare(a: IFileStat | IWorkspaceFolder, b: IFileStat | IWorkspaceFolder): number {
-		if (IWorkspaceFolder.isIWorkspaceFolder(a) && IWorkspaceFolder.isIWorkspaceFolder(b)) {
+		if (isWorkspaceFolder(a) && isWorkspaceFolder(b)) {
 			return a.index - b.index;
 		}
 		if ((a as IFileStat).isDirectory === (b as IFileStat).isDirectory) {
@@ -348,15 +342,14 @@ export class BreadcrumbsFilePicker extends BreadcrumbsPicker {
 
 	constructor(
 		parent: HTMLElement,
-		protected resource: URI,
+		resource: URI,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IThemeService themeService: IThemeService,
 		@IConfigurationService configService: IConfigurationService,
 		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 		@IEditorService private readonly _editorService: IEditorService,
-		@ITelemetryService telemetryService: ITelemetryService,
 	) {
-		super(parent, resource, instantiationService, themeService, configService, telemetryService);
+		super(parent, resource, instantiationService, themeService, configService);
 	}
 
 	_createTree(container: HTMLElement) {
@@ -407,7 +400,7 @@ export class BreadcrumbsFilePicker extends BreadcrumbsPicker {
 		await tree.setInput(input);
 		let focusElement: IWorkspaceFolder | IFileStat | undefined;
 		for (const { element } of tree.getNode().children) {
-			if (IWorkspaceFolder.isIWorkspaceFolder(element) && isEqual(element.uri, uri)) {
+			if (isWorkspaceFolder(element) && isEqual(element.uri, uri)) {
 				focusElement = element;
 				break;
 			} else if (isEqual((element as IFileStat).resource, uri)) {
@@ -427,15 +420,9 @@ export class BreadcrumbsFilePicker extends BreadcrumbsPicker {
 	}
 
 	async _revealElement(element: IFileStat | IWorkspaceFolder, options: IEditorOptions, sideBySide: boolean): Promise<boolean> {
-		let resource: URI | undefined;
-		if (IWorkspaceFolder.isIWorkspaceFolder(element)) {
-			resource = element.uri;
-		} else if (!element.isDirectory) {
-			resource = element.resource;
-		}
-		if (resource) {
+		if (!isWorkspaceFolder(element) && element.isFile) {
 			this._onWillPickElement.fire();
-			await this._editorService.openEditor({ resource, options }, sideBySide ? SIDE_GROUP : undefined);
+			await this._editorService.openEditor({ resource: element.resource, options }, sideBySide ? SIDE_GROUP : undefined);
 			return true;
 		}
 		return false;
@@ -472,7 +459,7 @@ export class BreadcrumbsOutlinePicker extends BreadcrumbsPicker {
 
 	protected _createTree(container: HTMLElement, input: OutlineElement2) {
 
-		const { breadcrumbsConfig: config } = input.outline;
+		const { config } = input.outline;
 
 		return <WorkbenchDataTree<IOutline<any>, any, FuzzyScore>>this._instantiationService.createInstance(
 			WorkbenchDataTree,

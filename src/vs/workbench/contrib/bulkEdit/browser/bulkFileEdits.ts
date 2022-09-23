@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 
-import { WorkspaceFileEditOptions } from 'vs/editor/common/modes';
-import { IFileService, FileSystemProviderCapabilities, IFileContent } from 'vs/platform/files/common/files';
+import { WorkspaceFileEditOptions } from 'vs/editor/common/languages';
+import { IFileService, FileSystemProviderCapabilities, IFileContent, IFileStatWithMetadata } from 'vs/platform/files/common/files';
 import { IProgress } from 'vs/platform/progress/common/progress';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IWorkingCopyFileService, IFileOperationUndoRedoInfo, IMoveOperation, ICopyOperation, IDeleteOperation, ICreateOperation, ICreateFileOperation } from 'vs/workbench/services/workingCopy/common/workingCopyFileService';
@@ -13,10 +13,11 @@ import { IWorkspaceUndoRedoElement, UndoRedoElementType, IUndoRedoService, UndoR
 import { URI } from 'vs/base/common/uri';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ILogService } from 'vs/platform/log/common/log';
-import { VSBuffer } from 'vs/base/common/buffer';
+import { decodeBase64, VSBuffer } from 'vs/base/common/buffer';
 import { ResourceFileEdit } from 'vs/editor/browser/services/bulkEditService';
 import { CancellationToken } from 'vs/base/common/cancellation';
-import { flatten, tail } from 'vs/base/common/arrays';
+import { tail } from 'vs/base/common/arrays';
+import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
 
 interface IFileOperation {
 	uris: URI[];
@@ -50,7 +51,7 @@ class RenameOperation implements IFileOperation {
 	) { }
 
 	get uris() {
-		return flatten(this._edits.map(edit => [edit.newUri, edit.oldUri]));
+		return this._edits.map(edit => [edit.newUri, edit.oldUri]).flat();
 	}
 
 	async perform(token: CancellationToken): Promise<IFileOperation> {
@@ -75,7 +76,7 @@ class RenameOperation implements IFileOperation {
 			return new Noop();
 		}
 
-		await this._workingCopyFileService.move(moves, this._undoRedoInfo, token);
+		await this._workingCopyFileService.move(moves, token, this._undoRedoInfo);
 		return new RenameOperation(undoes, { isUndoing: true }, this._workingCopyFileService, this._fileService);
 	}
 
@@ -104,7 +105,7 @@ class CopyOperation implements IFileOperation {
 	) { }
 
 	get uris() {
-		return flatten(this._edits.map(edit => [edit.newUri, edit.oldUri]));
+		return this._edits.map(edit => [edit.newUri, edit.oldUri]).flat();
 	}
 
 	async perform(token: CancellationToken): Promise<IFileOperation> {
@@ -124,7 +125,7 @@ class CopyOperation implements IFileOperation {
 		}
 
 		// (2) perform the actual copy and use the return stats to build undo edits
-		const stats = await this._workingCopyFileService.copy(copies, this._undoRedoInfo, token);
+		const stats = await this._workingCopyFileService.copy(copies, token, this._undoRedoInfo);
 		const undoes: DeleteEdit[] = [];
 
 		for (let i = 0; i < stats.length; i++) {
@@ -158,6 +159,7 @@ class CreateOperation implements IFileOperation {
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkingCopyFileService private readonly _workingCopyFileService: IWorkingCopyFileService,
 		@IInstantiationService private readonly _instaService: IInstantiationService,
+		@ITextFileService private readonly _textFileService: ITextFileService
 	) { }
 
 	get uris() {
@@ -177,17 +179,19 @@ class CreateOperation implements IFileOperation {
 			if (edit.options.folder) {
 				folderCreates.push({ resource: edit.newUri });
 			} else {
-				fileCreates.push({ resource: edit.newUri, contents: edit.contents, overwrite: edit.options.overwrite });
+				// If the contents are part of the edit they include the encoding, thus use them. Otherwise get the encoding for a new empty file.
+				const encodedReadable = typeof edit.contents !== 'undefined' ? edit.contents : await this._textFileService.getEncodedReadable(edit.newUri);
+				fileCreates.push({ resource: edit.newUri, contents: encodedReadable, overwrite: edit.options.overwrite });
 			}
 			undoes.push(new DeleteEdit(edit.newUri, edit.options, !edit.options.folder && !edit.contents));
 		}
 
-		if (fileCreates.length === 0 && folderCreates.length === 0) {
+		if (folderCreates.length === 0 && fileCreates.length === 0) {
 			return new Noop();
 		}
 
-		await this._workingCopyFileService.createFolder(folderCreates, this._undoRedoInfo, token);
-		await this._workingCopyFileService.create(fileCreates, this._undoRedoInfo, token);
+		await this._workingCopyFileService.createFolder(folderCreates, token, this._undoRedoInfo);
+		await this._workingCopyFileService.create(fileCreates, token, this._undoRedoInfo);
 
 		return this._instaService.createInstance(DeleteOperation, undoes, { isUndoing: true });
 	}
@@ -229,7 +233,10 @@ class DeleteOperation implements IFileOperation {
 		const undoes: CreateEdit[] = [];
 
 		for (const edit of this._edits) {
-			if (!await this._fileService.exists(edit.oldUri)) {
+			let fileStat: IFileStatWithMetadata | undefined;
+			try {
+				fileStat = await this._fileService.resolve(edit.oldUri, { resolveMetadata: true });
+			} catch (err) {
 				if (!edit.options.ignoreIfNotExists) {
 					throw new Error(`${edit.oldUri} does not exist and can not be deleted`);
 				}
@@ -245,15 +252,15 @@ class DeleteOperation implements IFileOperation {
 
 			// read file contents for undo operation. when a file is too large it won't be restored
 			let fileContent: IFileContent | undefined;
-			if (!edit.undoesCreate && !edit.options.folder) {
+			if (!edit.undoesCreate && !edit.options.folder && !(typeof edit.options.maxSize === 'number' && fileStat.size > edit.options.maxSize)) {
 				try {
 					fileContent = await this._fileService.readFile(edit.oldUri);
 				} catch (err) {
 					this._logService.critical(err);
 				}
 			}
-			if (!(typeof edit.options.maxSize === 'number' && fileContent && (fileContent?.size > edit.options.maxSize))) {
-				undoes.push(new CreateEdit(edit.oldUri, edit.options, fileContent?.value));
+			if (fileContent !== undefined) {
+				undoes.push(new CreateEdit(edit.oldUri, edit.options, fileContent.value));
 			}
 		}
 
@@ -261,7 +268,7 @@ class DeleteOperation implements IFileOperation {
 			return new Noop();
 		}
 
-		await this._workingCopyFileService.delete(deletes, this._undoRedoInfo, token);
+		await this._workingCopyFileService.delete(deletes, token, this._undoRedoInfo);
 
 		if (undoes.length === 0) {
 			return new Noop();
@@ -282,9 +289,11 @@ class FileUndoRedoElement implements IWorkspaceUndoRedoElement {
 
 	constructor(
 		readonly label: string,
-		readonly operations: IFileOperation[]
+		readonly code: string,
+		readonly operations: IFileOperation[],
+		readonly confirmBeforeUndo: boolean
 	) {
-		this.resources = (<URI[]>[]).concat(...operations.map(op => op.uris));
+		this.resources = operations.map(op => op.uris).flat();
 	}
 
 	async undo(): Promise<void> {
@@ -312,8 +321,10 @@ export class BulkFileEdits {
 
 	constructor(
 		private readonly _label: string,
+		private readonly _code: string,
 		private readonly _undoRedoGroup: UndoRedoGroup,
 		private readonly _undoRedoSource: UndoRedoSource | undefined,
+		private readonly _confirmBeforeUndo: boolean,
 		private readonly _progress: IProgress<void>,
 		private readonly _token: CancellationToken,
 		private readonly _edits: ResourceFileEdit[],
@@ -321,7 +332,7 @@ export class BulkFileEdits {
 		@IUndoRedoService private readonly _undoRedoService: IUndoRedoService,
 	) { }
 
-	async apply(): Promise<void> {
+	async apply(): Promise<readonly URI[]> {
 		const undoOperations: IFileOperation[] = [];
 		const undoRedoInfo = { undoRedoGroupId: this._undoRedoGroup.id };
 
@@ -334,12 +345,12 @@ export class BulkFileEdits {
 			} else if (!edit.newResource && edit.oldResource) {
 				edits.push(new DeleteEdit(edit.oldResource, edit.options ?? {}, false));
 			} else if (edit.newResource && !edit.oldResource) {
-				edits.push(new CreateEdit(edit.newResource, edit.options ?? {}, undefined));
+				edits.push(new CreateEdit(edit.newResource, edit.options ?? {}, edit.options.contentsBase64 ? decodeBase64(edit.options.contentsBase64) : undefined));
 			}
 		}
 
 		if (edits.length === 0) {
-			return;
+			return [];
 		}
 
 		const groups: Array<RenameEdit | CopyEdit | DeleteEdit | CreateEdit>[] = [];
@@ -355,7 +366,7 @@ export class BulkFileEdits {
 			}
 		}
 
-		for (let group of groups) {
+		for (const group of groups) {
 
 			if (this._token.isCancellationRequested) {
 				break;
@@ -384,6 +395,8 @@ export class BulkFileEdits {
 			this._progress.report(undefined);
 		}
 
-		this._undoRedoService.pushElement(new FileUndoRedoElement(this._label, undoOperations), this._undoRedoGroup, this._undoRedoSource);
+		const undoRedoElement = new FileUndoRedoElement(this._label, this._code, undoOperations, this._confirmBeforeUndo);
+		this._undoRedoService.pushElement(undoRedoElement, this._undoRedoGroup, this._undoRedoSource);
+		return undoRedoElement.resources;
 	}
 }

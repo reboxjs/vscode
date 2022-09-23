@@ -21,12 +21,12 @@ export class ResourceMap<T> {
 		return resource.toString(true);
 	};
 
-	private readonly _map = new Map<string, { readonly resource: vscode.Uri, value: T }>();
+	private readonly _map = new Map<string, { readonly resource: vscode.Uri; value: T }>();
 
 	constructor(
 		protected readonly _normalizePath: (resource: vscode.Uri) => string | undefined = ResourceMap.defaultPathNormalizer,
 		protected readonly config: {
-			readonly onCaseInsenitiveFileSystem: boolean,
+			readonly onCaseInsensitiveFileSystem: boolean;
 		},
 	) { }
 
@@ -73,10 +73,10 @@ export class ResourceMap<T> {
 	}
 
 	public get values(): Iterable<T> {
-		return Array.from(this._map.values()).map(x => x.value);
+		return Array.from(this._map.values(), x => x.value);
 	}
 
-	public get entries(): Iterable<{ resource: vscode.Uri, value: T }> {
+	public get entries(): Iterable<{ resource: vscode.Uri; value: T }> {
 		return this._map.values();
 	}
 
@@ -92,7 +92,7 @@ export class ResourceMap<T> {
 		if (isWindowsPath(path)) {
 			return true;
 		}
-		return path[0] === '/' && this.config.onCaseInsenitiveFileSystem;
+		return path[0] === '/' && this.config.onCaseInsensitiveFileSystem;
 	}
 }
 

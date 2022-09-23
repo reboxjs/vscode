@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as path from 'path';
 import * as vscode from 'vscode';
 import type * as Proto from '../protocol';
 import { ITypeScriptServiceClient } from '../typescriptService';
 import API from '../utils/api';
 import { Disposable } from '../utils/dispose';
 import * as fileSchemes from '../utils/fileSchemes';
-import { isTypeScriptDocument } from '../utils/languageModeIds';
+import { isTypeScriptDocument } from '../utils/languageIds';
 import { equals } from '../utils/objects';
 import { ResourceMap } from '../utils/resourceMap';
 
@@ -27,10 +28,10 @@ export default class FileConfigurationManager extends Disposable {
 
 	public constructor(
 		private readonly client: ITypeScriptServiceClient,
-		onCaseInsenitiveFileSystem: boolean
+		onCaseInsensitiveFileSystem: boolean
 	) {
 		super();
-		this.formatOptions = new ResourceMap(undefined, { onCaseInsenitiveFileSystem });
+		this.formatOptions = new ResourceMap(undefined, { onCaseInsensitiveFileSystem });
 		vscode.workspace.onDidCloseTextDocument(textDocument => {
 			// When a document gets closed delete the cached formatting options.
 			// This is necessary since the tsserver now closed a project when its
@@ -167,22 +168,33 @@ export default class FileConfigurationManager extends Disposable {
 
 		const config = vscode.workspace.getConfiguration(
 			isTypeScriptDocument(document) ? 'typescript' : 'javascript',
-			document.uri);
+			document);
 
 		const preferencesConfig = vscode.workspace.getConfiguration(
 			isTypeScriptDocument(document) ? 'typescript.preferences' : 'javascript.preferences',
-			document.uri);
+			document);
 
 		const preferences: Proto.UserPreferences = {
+			...config.get('unstable'),
 			quotePreference: this.getQuoteStylePreference(preferencesConfig),
-			// @ts-expect-error until TypeScript 4.2 API
 			importModuleSpecifierPreference: getImportModuleSpecifierPreference(preferencesConfig),
 			importModuleSpecifierEnding: getImportModuleSpecifierEndingPreference(preferencesConfig),
+			jsxAttributeCompletionStyle: getJsxAttributeCompletionStyle(preferencesConfig),
 			allowTextChangesInNewFiles: document.uri.scheme === fileSchemes.file,
 			providePrefixAndSuffixTextForRename: preferencesConfig.get<boolean>('renameShorthandProperties', true) === false ? false : preferencesConfig.get<boolean>('useAliasesForRenames', true),
 			allowRenameOfImportPath: true,
 			includeAutomaticOptionalChainCompletions: config.get<boolean>('suggest.includeAutomaticOptionalChainCompletions', true),
 			provideRefactorNotApplicableReason: true,
+			generateReturnInDocTemplate: config.get<boolean>('suggest.jsdoc.generateReturns', true),
+			includeCompletionsForImportStatements: config.get<boolean>('suggest.includeCompletionsForImportStatements', true),
+			includeCompletionsWithSnippetText: config.get<boolean>('suggest.includeCompletionsWithSnippetText', true),
+			includeCompletionsWithClassMemberSnippets: config.get<boolean>('suggest.classMemberSnippets.enabled', true),
+			includeCompletionsWithObjectLiteralMethodSnippets: config.get<boolean>('suggest.objectLiteralMethodSnippets.enabled', true),
+			autoImportFileExcludePatterns: this.getAutoImportFileExcludePatternsPreference(preferencesConfig, vscode.workspace.getWorkspaceFolder(document.uri)?.uri),
+			useLabelDetailsInCompletionEntries: true,
+			allowIncompleteCompletions: true,
+			displayPartsForJSDoc: true,
+			...getInlayHintsPreferences(config),
 		};
 
 		return preferences;
@@ -194,6 +206,50 @@ export default class FileConfigurationManager extends Disposable {
 			case 'double': return 'double';
 			default: return this.client.apiVersion.gte(API.v333) ? 'auto' : undefined;
 		}
+	}
+
+	private getAutoImportFileExcludePatternsPreference(config: vscode.WorkspaceConfiguration, workspaceFolder: vscode.Uri | undefined): string[] | undefined {
+		return workspaceFolder && config.get<string[]>('autoImportFileExcludePatterns')?.map(p => {
+			// Normalization rules: https://github.com/microsoft/TypeScript/pull/49578
+			const slashNormalized = p.replace(/\\/g, '/');
+			const isRelative = /^\.\.?($|\/)/.test(slashNormalized);
+			return path.isAbsolute(p) ? p :
+				p.startsWith('*') ? '/' + slashNormalized :
+					isRelative ? vscode.Uri.joinPath(workspaceFolder, p).fsPath :
+						'/**/' + slashNormalized;
+		});
+	}
+}
+
+export class InlayHintSettingNames {
+	static readonly parameterNamesSuppressWhenArgumentMatchesName = 'inlayHints.parameterNames.suppressWhenArgumentMatchesName';
+	static readonly parameterNamesEnabled = 'inlayHints.parameterTypes.enabled';
+	static readonly variableTypesEnabled = 'inlayHints.variableTypes.enabled';
+	static readonly variableTypesSuppressWhenTypeMatchesName = 'inlayHints.variableTypes.suppressWhenTypeMatchesName';
+	static readonly propertyDeclarationTypesEnabled = 'inlayHints.propertyDeclarationTypes.enabled';
+	static readonly functionLikeReturnTypesEnabled = 'inlayHints.functionLikeReturnTypes.enabled';
+	static readonly enumMemberValuesEnabled = 'inlayHints.enumMemberValues.enabled';
+}
+
+export function getInlayHintsPreferences(config: vscode.WorkspaceConfiguration) {
+	return {
+		includeInlayParameterNameHints: getInlayParameterNameHintsPreference(config),
+		includeInlayParameterNameHintsWhenArgumentMatchesName: !config.get<boolean>(InlayHintSettingNames.parameterNamesSuppressWhenArgumentMatchesName, true),
+		includeInlayFunctionParameterTypeHints: config.get<boolean>(InlayHintSettingNames.parameterNamesEnabled, false),
+		includeInlayVariableTypeHints: config.get<boolean>(InlayHintSettingNames.variableTypesEnabled, false),
+		includeInlayVariableTypeHintsWhenTypeMatchesName: !config.get<boolean>(InlayHintSettingNames.variableTypesSuppressWhenTypeMatchesName, true),
+		includeInlayPropertyDeclarationTypeHints: config.get<boolean>(InlayHintSettingNames.propertyDeclarationTypesEnabled, false),
+		includeInlayFunctionLikeReturnTypeHints: config.get<boolean>(InlayHintSettingNames.functionLikeReturnTypesEnabled, false),
+		includeInlayEnumMemberValueHints: config.get<boolean>(InlayHintSettingNames.enumMemberValuesEnabled, false),
+	} as const;
+}
+
+function getInlayParameterNameHintsPreference(config: vscode.WorkspaceConfiguration) {
+	switch (config.get<string>('inlayHints.parameterNames.enabled')) {
+		case 'none': return 'none';
+		case 'literals': return 'literals';
+		case 'all': return 'all';
+		default: return undefined;
 	}
 }
 
@@ -211,6 +267,14 @@ function getImportModuleSpecifierEndingPreference(config: vscode.WorkspaceConfig
 		case 'minimal': return 'minimal';
 		case 'index': return 'index';
 		case 'js': return 'js';
+		default: return 'auto';
+	}
+}
+
+function getJsxAttributeCompletionStyle(config: vscode.WorkspaceConfiguration) {
+	switch (config.get<string>('jsxAttributeCompletionStyle')) {
+		case 'braces': return 'braces';
+		case 'none': return 'none';
 		default: return 'auto';
 	}
 }

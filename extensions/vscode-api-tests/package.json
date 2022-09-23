@@ -4,13 +4,55 @@
   "version": "0.0.1",
   "publisher": "vscode",
   "license": "MIT",
-  "enableProposedApi": true,
+  "enabledApiProposals": [
+    "authSession",
+    "contribViewsRemote",
+    "customEditorMove",
+    "diffCommand",
+    "documentFiltersExclusive",
+    "editorInsets",
+    "extensionRuntime",
+    "extensionsAny",
+    "externalUriOpener",
+    "fileSearchProvider",
+    "findTextInFiles",
+    "fsChunks",
+    "notebookCellExecutionState",
+    "notebookContentProvider",
+    "notebookControllerKind",
+    "notebookDebugOptions",
+    "notebookDeprecated",
+    "notebookLiveShare",
+    "notebookMessaging",
+    "notebookMime",
+    "portsAttributes",
+    "quickPickSortByLabel",
+    "resolvers",
+    "scmActionButton",
+    "scmSelectedProvider",
+    "scmValidation",
+    "taskPresentationGroup",
+    "terminalDataWriteEvent",
+    "terminalDimensions",
+    "envShellEvent",
+    "testCoverage",
+    "testObserver",
+    "textSearchProvider",
+    "timeline",
+    "tokenInformation",
+    "treeItemCheckbox",
+    "treeViewReveal",
+    "workspaceTrust",
+    "telemetry",
+    "localization"
+  ],
   "private": true,
   "activationEvents": [],
   "main": "./out/extension",
   "engines": {
-    "vscode": "^1.25.0"
+    "vscode": "^1.55.0"
   },
+  "icon": "media/icon.png",
   "contributes": {
     "configuration": {
       "type": "object",
@@ -36,6 +78,15 @@
           "default": "get-prop"
         }
       }
+    },
+    "views": {
+      "remote": [
+        {
+          "id": "test.treeId",
+          "name": "test-tree",
+          "when": "never"
+        }
+      ]
     },
     "configurationDefaults": {
       "[abcLang]": {
@@ -106,6 +157,36 @@
           }
         ]
       }
+    ],
+    "notebooks": [
+      {
+        "type": "notebookCoreTest",
+        "displayName": "Notebook Core Test",
+        "selector": [
+          {
+            "filenamePattern": "*.vsctestnb",
+            "excludeFileNamePattern": ""
+          }
+        ]
+      },
+      {
+        "type": "notebook.nbdtest",
+        "displayName": "notebook.nbdtest",
+        "selector": [
+          {
+            "filenamePattern": "**/*.nbdtest"
+          }
+        ]
+      },
+      {
+        "type": "notebook.nbdserializer",
+        "displayName": "notebook.nbdserializer",
+        "selector": [
+          {
+            "filenamePattern": "**/*.nbdserializer"
+          }
+        ]
+      }
     ]
   },
   "scripts": {
@@ -113,7 +194,11 @@
     "vscode:prepublish": "node ../../node_modules/gulp/bin/gulp.js --gulpfile ../../build/gulpfile.extensions.js compile-extension:vscode-api-tests ./tsconfig.json"
   },
   "devDependencies": {
-    "@types/mocha": "^8.2.0",
-    "@types/node": "^12.19.9"
+    "@types/mocha": "^9.1.1",
+    "@types/node": "16.x"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/microsoft/vscode.git"
   }
 }

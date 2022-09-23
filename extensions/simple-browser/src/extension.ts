@@ -3,21 +3,50 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URL } from 'url';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 import { SimpleBrowserManager } from './simpleBrowserManager';
+import { SimpleBrowserView } from './simpleBrowserView';
+
+declare class URL {
+	constructor(input: string, base?: string | URL);
+	hostname: string;
+}
 
 const localize = nls.loadMessageBundle();
 
 const openApiCommand = 'simpleBrowser.api.open';
 const showCommand = 'simpleBrowser.show';
-const internalOpenCommand = '_simpleBrowser.open';
+
+const enabledHosts = new Set<string>([
+	'localhost',
+	// localhost IPv4
+	'127.0.0.1',
+	// localhost IPv6
+	'0:0:0:0:0:0:0:1',
+	'::1',
+	// all interfaces IPv4
+	'0.0.0.0',
+	// all interfaces IPv6
+	'0:0:0:0:0:0:0:0',
+	'::'
+]);
+
+const IPv6Localhost = /0\:0\:0\:0\:0\:0\:0\:1|\:\:1/;
+const IPv6AllInterfaces = /0\:0\:0\:0\:0\:0\:0\:0|\:\:/;
+
+const openerId = 'simpleBrowser.open';
 
 export function activate(context: vscode.ExtensionContext) {
 
 	const manager = new SimpleBrowserManager(context.extensionUri);
 	context.subscriptions.push(manager);
+
+	context.subscriptions.push(vscode.window.registerWebviewPanelSerializer(SimpleBrowserView.viewType, {
+		deserializeWebviewPanel: async (panel, state) => {
+			manager.restore(panel, state);
+		}
+	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand(showCommand, async (url?: string) => {
 		if (!url) {
@@ -32,39 +61,37 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand(openApiCommand, (url: vscode.Uri, showOptions?: { preserveFocus?: boolean }) => {
+	context.subscriptions.push(vscode.commands.registerCommand(openApiCommand, (url: vscode.Uri, showOptions?: {
+		preserveFocus?: boolean;
+		viewColumn: vscode.ViewColumn;
+	}) => {
 		manager.show(url.toString(), showOptions);
 	}));
 
-	context.subscriptions.push(vscode.commands.registerCommand(internalOpenCommand, (resolvedUrl: vscode.Uri, _originalUri: vscode.Uri) => {
-		manager.show(resolvedUrl.toString());
-	}));
-
-	context.subscriptions.push(vscode.window.registerExternalUriOpener(['http', 'https'], {
-		openExternalUri(uri: vscode.Uri): vscode.Command | undefined {
-			const configuration = vscode.workspace.getConfiguration('simpleBrowser');
-			if (!configuration.get('opener.enabled', false)) {
-				return undefined;
+	context.subscriptions.push(vscode.window.registerExternalUriOpener(openerId, {
+		canOpenExternalUri(uri: vscode.Uri) {
+			// We have to replace the IPv6 hosts with IPv4 because URL can't handle IPv6.
+			const originalUri = new URL(uri.toString().replace(IPv6Localhost, '127.0.0.1').replace(IPv6AllInterfaces, '0.0.0.0'));
+			if (enabledHosts.has(originalUri.hostname)) {
+				return isWeb()
+					? vscode.ExternalUriOpenerPriority.Default
+					: vscode.ExternalUriOpenerPriority.Option;
 			}
 
-			const enabledHosts = configuration.get<string[]>('opener.enabledHosts', [
-				'localhost',
-				'127.0.0.1'
-			]);
-			try {
-				const originalUri = new URL(uri.toString());
-				if (!enabledHosts.includes(originalUri.hostname)) {
-					return;
-				}
-			} catch {
-				return undefined;
-			}
-
-			return {
-				title: localize('openTitle', "Open in simple browser"),
-				command: internalOpenCommand,
-				arguments: [uri]
-			};
+			return vscode.ExternalUriOpenerPriority.None;
+		},
+		openExternalUri(resolveUri: vscode.Uri) {
+			return manager.show(resolveUri.toString(), {
+				viewColumn: vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active
+			});
 		}
+	}, {
+		schemes: ['http', 'https'],
+		label: localize('openTitle', "Open in simple browser"),
 	}));
+}
+
+function isWeb(): boolean {
+	// @ts-expect-error
+	return typeof navigator !== 'undefined' && vscode.env.uiKind === vscode.UIKind.Web;
 }

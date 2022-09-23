@@ -15,8 +15,12 @@ import { IFilesConfiguration } from 'vs/platform/files/common/files';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { ITelemetryData } from 'vs/platform/telemetry/common/telemetry';
 import { Event } from 'vs/base/common/event';
-import { relative } from 'vs/base/common/path';
-import { isPromiseCanceledError } from 'vs/base/common/errors';
+import * as paths from 'vs/base/common/path';
+import { isCancellationError } from 'vs/base/common/errors';
+import { TextSearchCompleteMessageType } from 'vs/workbench/services/search/common/searchExtTypes';
+import { isThenable } from 'vs/base/common/async';
+
+export { TextSearchCompleteMessageType };
 
 export const VIEWLET_ID = 'workbench.view.search';
 export const PANEL_ID = 'workbench.panel.search';
@@ -65,6 +69,7 @@ export interface IFolderQuery<U extends UriComponents = URI> {
 	fileEncoding?: string;
 	disregardIgnoreFiles?: boolean;
 	disregardGlobalIgnoreFiles?: boolean;
+	disregardParentIgnoreFiles?: boolean;
 	ignoreSymlinks?: boolean;
 }
 
@@ -76,6 +81,8 @@ export interface ICommonQueryProps<U extends UriComponents> {
 	includePattern?: glob.IExpression;
 	excludePattern?: glob.IExpression;
 	extraFileResources?: U[];
+
+	onlyOpenEditors?: boolean;
 
 	maxResults?: number;
 	usingSearchPaths?: boolean;
@@ -201,14 +208,21 @@ export function isProgressMessage(p: ISearchProgressItem | ISerializedSearchProg
 	return !!(p as IProgressMessage).message;
 }
 
+export interface ITextSearchCompleteMessage {
+	text: string;
+	type: TextSearchCompleteMessageType;
+	trusted?: boolean;
+}
+
 export interface ISearchCompleteStats {
 	limitHit?: boolean;
+	messages: ITextSearchCompleteMessage[];
 	stats?: IFileSearchStats | ITextSearchStats;
 }
 
 export interface ISearchComplete extends ISearchCompleteStats {
 	results: IFileMatch[];
-	exit?: SearchCompletionExitCode
+	exit?: SearchCompletionExitCode;
 }
 
 export const enum SearchCompletionExitCode {
@@ -334,6 +348,11 @@ export class OneLineRange extends SearchRange {
 	}
 }
 
+export const enum ViewMode {
+	List = 'list',
+	Tree = 'tree'
+}
+
 export const enum SearchSortOrder {
 	Default = 'default',
 	FileNames = 'fileNames',
@@ -351,6 +370,7 @@ export interface ISearchConfigurationProperties {
 	 */
 	useIgnoreFiles: boolean;
 	useGlobalIgnoreFiles: boolean;
+	useParentIgnoreFiles: boolean;
 	followSymlinks: boolean;
 	smartCase: boolean;
 	globalFindClipboard: boolean;
@@ -360,6 +380,7 @@ export interface ISearchConfigurationProperties {
 	usePCRE2: boolean;
 	actionsPosition: 'auto' | 'right';
 	maintainFileSearchCache: boolean;
+	maxResults: number | null;
 	collapseResults: 'auto' | 'alwaysCollapse' | 'alwaysExpand';
 	searchOnType: boolean;
 	seedOnFocus: boolean;
@@ -367,12 +388,17 @@ export interface ISearchConfigurationProperties {
 	searchOnTypeDebouncePeriod: number;
 	mode: 'view' | 'reuseEditor' | 'newEditor';
 	searchEditor: {
-		doubleClickBehaviour: 'selectWord' | 'goToLocation' | 'openLocationToSide',
-		reusePriorSearchConfiguration: boolean,
-		defaultNumberOfContextLines: number | null,
-		experimental: {}
+		doubleClickBehaviour: 'selectWord' | 'goToLocation' | 'openLocationToSide';
+		reusePriorSearchConfiguration: boolean;
+		defaultNumberOfContextLines: number | null;
+		experimental: {};
 	};
 	sortOrder: SearchSortOrder;
+	decorations: {
+		colors: boolean;
+		badges: boolean;
+	};
+	defaultViewMode: ViewMode;
 }
 
 export interface ISearchConfiguration extends IFilesConfiguration {
@@ -407,21 +433,25 @@ export function pathIncludedInQuery(queryProps: ICommonQueryProps<URI>, fsPath: 
 		return false;
 	}
 
-	if (queryProps.includePattern && !glob.match(queryProps.includePattern, fsPath)) {
-		return false;
-	}
+	if (queryProps.includePattern || queryProps.usingSearchPaths) {
+		if (queryProps.includePattern && glob.match(queryProps.includePattern, fsPath)) {
+			return true;
+		}
 
-	// If searchPaths are being used, the extra file must be in a subfolder and match the pattern, if present
-	if (queryProps.usingSearchPaths) {
-		return !!queryProps.folderQueries && queryProps.folderQueries.every(fq => {
-			const searchPath = fq.folder.fsPath;
-			if (extpath.isEqualOrParent(fsPath, searchPath)) {
-				const relPath = relative(searchPath, fsPath);
-				return !fq.includePattern || !!glob.match(fq.includePattern, relPath);
-			} else {
-				return false;
-			}
-		});
+		// If searchPaths are being used, the extra file must be in a subfolder and match the pattern, if present
+		if (queryProps.usingSearchPaths) {
+			return !!queryProps.folderQueries && queryProps.folderQueries.some(fq => {
+				const searchPath = fq.folder.fsPath;
+				if (extpath.isEqualOrParent(fsPath, searchPath)) {
+					const relPath = paths.relative(searchPath, fsPath);
+					return !fq.includePattern || !!glob.match(fq.includePattern, relPath);
+				} else {
+					return false;
+				}
+			});
+		}
+
+		return false;
 	}
 
 	return true;
@@ -446,7 +476,7 @@ export class SearchError extends Error {
 export function deserializeSearchError(error: Error): SearchError {
 	const errorMsg = error.message;
 
-	if (isPromiseCanceledError(error)) {
+	if (isCancellationError(error)) {
 		return new SearchError(errorMsg, SearchErrorCode.canceled);
 	}
 
@@ -498,19 +528,21 @@ export interface ISearchEngine<T> {
 export interface ISerializedSearchSuccess {
 	type: 'success';
 	limitHit: boolean;
+	messages: ITextSearchCompleteMessage[];
 	stats?: IFileSearchStats | ITextSearchStats;
 }
 
 export interface ISearchEngineSuccess {
 	limitHit: boolean;
+	messages: ITextSearchCompleteMessage[];
 	stats: ISearchEngineStats;
 }
 
 export interface ISerializedSearchError {
 	type: 'error';
 	error: {
-		message: string,
-		stack: string
+		message: string;
+		stack: string;
 	};
 }
 
@@ -620,6 +652,14 @@ export class QueryGlobTester {
 		}
 	}
 
+	matchesExcludesSync(testPath: string, basename?: string, hasSibling?: (name: string) => boolean): boolean {
+		if (this._parsedExcludeExpression && this._parsedExcludeExpression(testPath, basename, hasSibling)) {
+			return true;
+		}
+
+		return false;
+	}
+
 	/**
 	 * Guaranteed sync - siblingsFn should not return a promise.
 	 */
@@ -636,22 +676,29 @@ export class QueryGlobTester {
 	}
 
 	/**
-	 * Guaranteed async.
+	 * Evaluating the exclude expression is only async if it includes sibling clauses. As an optimization, avoid doing anything with Promises
+	 * unless the expression is async.
 	 */
-	includedInQuery(testPath: string, basename?: string, hasSibling?: (name: string) => boolean | Promise<boolean>): Promise<boolean> {
-		const excludeP = Promise.resolve(this._parsedExcludeExpression(testPath, basename, hasSibling)).then(result => !!result);
+	includedInQuery(testPath: string, basename?: string, hasSibling?: (name: string) => boolean | Promise<boolean>): Promise<boolean> | boolean {
+		const excluded = this._parsedExcludeExpression(testPath, basename, hasSibling);
 
-		return excludeP.then(excluded => {
-			if (excluded) {
-				return false;
-			}
-
+		const isIncluded = () => {
 			return this._parsedIncludeExpression ?
-				Promise.resolve(this._parsedIncludeExpression(testPath, basename, hasSibling)).then(result => !!result) :
-				Promise.resolve(true);
-		}).then(included => {
-			return included;
-		});
+				!!(this._parsedIncludeExpression(testPath, basename, hasSibling)) :
+				true;
+		};
+
+		if (isThenable(excluded)) {
+			return excluded.then(excluded => {
+				if (excluded) {
+					return false;
+				}
+
+				return isIncluded();
+			});
+		}
+
+		return isIncluded();
 	}
 
 	hasSiblingExcludeClauses(): boolean {
@@ -667,4 +714,42 @@ function hasSiblingClauses(pattern: glob.IExpression): boolean {
 	}
 
 	return false;
+}
+
+export function hasSiblingPromiseFn(siblingsFn?: () => Promise<string[]>) {
+	if (!siblingsFn) {
+		return undefined;
+	}
+
+	let siblings: Promise<Record<string, true>>;
+	return (name: string) => {
+		if (!siblings) {
+			siblings = (siblingsFn() || Promise.resolve([]))
+				.then(list => list ? listToMap(list) : {});
+		}
+		return siblings.then(map => !!map[name]);
+	};
+}
+
+export function hasSiblingFn(siblingsFn?: () => string[]) {
+	if (!siblingsFn) {
+		return undefined;
+	}
+
+	let siblings: Record<string, true>;
+	return (name: string) => {
+		if (!siblings) {
+			const list = siblingsFn();
+			siblings = list ? listToMap(list) : {};
+		}
+		return !!siblings[name];
+	};
+}
+
+function listToMap(list: string[]) {
+	const map: Record<string, true> = {};
+	for (const key of list) {
+		map[key] = true;
+	}
+	return map;
 }
