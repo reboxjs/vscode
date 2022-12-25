@@ -43,21 +43,21 @@ function shake(options) {
     const ts = require('typescript');
     const languageService = createTypeScriptLanguageService(ts, options);
     const program = languageService.getProgram();
-    const globalDiagnostics = program.getGlobalDiagnostics();
-    if (globalDiagnostics.length > 0) {
-        printDiagnostics(options, globalDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
-    const syntacticDiagnostics = program.getSyntacticDiagnostics();
-    if (syntacticDiagnostics.length > 0) {
-        printDiagnostics(options, syntacticDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
-    const semanticDiagnostics = program.getSemanticDiagnostics();
-    if (semanticDiagnostics.length > 0) {
-        printDiagnostics(options, semanticDiagnostics);
-        throw new Error(`Compilation Errors encountered.`);
-    }
+    // const globalDiagnostics = program.getGlobalDiagnostics();
+    // if (globalDiagnostics.length > 0) {
+    // 	printDiagnostics(options, globalDiagnostics);
+    // 	throw new Error(`Compilation Errors encountered.`);
+    // }
+    // const syntacticDiagnostics = program.getSyntacticDiagnostics();
+    // if (syntacticDiagnostics.length > 0) {
+    // 	printDiagnostics(options, syntacticDiagnostics);
+    // 	throw new Error(`Compilation Errors encountered.`);
+    // }
+    // const semanticDiagnostics = program.getSemanticDiagnostics();
+    // if (semanticDiagnostics.length > 0) {
+    // 	printDiagnostics(options, semanticDiagnostics);
+    // 	throw new Error(`Compilation Errors encountered.`);
+    // }
     markNodes(ts, languageService, options);
     return generateResult(ts, languageService, options.shakeLevel);
 }
@@ -115,6 +115,9 @@ function discoverAndReadFiles(ts, options) {
         if (options.redirects[moduleId]) {
             ts_filename = path.join(options.sourcesRoot, options.redirects[moduleId] + '.ts');
         }
+        // else if (options.nodeModules.includes(moduleId)) {
+        //     ts_filename = moduleId;
+        // }
         else {
             ts_filename = path.join(options.sourcesRoot, moduleId + '.ts');
         }
@@ -122,6 +125,9 @@ function discoverAndReadFiles(ts, options) {
         const info = ts.preProcessFile(ts_filecontents);
         for (let i = info.importedFiles.length - 1; i >= 0; i--) {
             const importedFileName = info.importedFiles[i].fileName;
+            // if (options.nodeModules.includes(importedFileName)) {
+            //     continue;
+            // }
             if (options.importIgnorePattern.test(importedFileName)) {
                 // Ignore vs/css! imports
                 continue;
