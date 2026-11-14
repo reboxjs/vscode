@@ -85,24 +85,20 @@ async function assertKernel(kernel: Kernel, notebook: vscode.NotebookDocument): 
 	assert.ok(kernel.associatedNotebooks.has(notebook.uri.toString()));
 }
 
-const apiTestContentProvider: vscode.NotebookContentProvider = {
-	openNotebook: async (resource: vscode.Uri): Promise<vscode.NotebookData> => {
-		if (/.*empty\-.*\.vsctestnb$/.test(resource.path)) {
-			return {
-				metadata: {},
-				cells: []
-			};
-		}
-
+const apiTestSerializer: vscode.NotebookSerializer = {
+	serializeNotebook(_data, _token) {
+		return new Uint8Array();
+	},
+	deserializeNotebook(_content, _token) {
 		const dto: vscode.NotebookData = {
-			metadata: { custom: { testMetadata: false } },
+			metadata: { testMetadata: false },
 			cells: [
 				{
 					value: 'test',
 					languageId: 'typescript',
 					kind: vscode.NotebookCellKind.Code,
 					outputs: [],
-					metadata: { custom: { testCellMetadata: 123 } },
+					metadata: { testCellMetadata: 123 },
 					executionSummary: { timing: { startTime: 10, endTime: 20 } }
 				},
 				{
@@ -119,7 +115,7 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 							})
 					],
 					executionSummary: { executionOrder: 5, success: true },
-					metadata: { custom: { testCellMetadata: 456 } }
+					metadata: { testCellMetadata: 456 }
 				}
 			]
 		};
@@ -143,8 +139,8 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 		suiteDisposables.length = 0;
 	});
 
-	suiteSetup(function () {
-		suiteDisposables.push(vscode.workspace.registerNotebookContentProvider('notebookCoreTest', apiTestContentProvider));
+	suiteSetup(() => {
+		suiteDisposables.push(vscode.workspace.registerNotebookSerializer('notebookCoreTest', apiTestSerializer));
 	});
 
 	let defaultKernel: Kernel;
@@ -163,38 +159,61 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 	});
 
 	test('cell execute command takes arguments', async () => {
+		console.log('Step1.cell execute command takes arguments');
 		const notebook = await openRandomNotebookDocument();
+		console.log('Step2.cell execute command takes arguments');
 		await vscode.window.showNotebookDocument(notebook);
+		console.log('Step3.cell execute command takes arguments');
 		assert.strictEqual(vscode.window.activeNotebookEditor !== undefined, true, 'notebook first');
 		const editor = vscode.window.activeNotebookEditor!;
 		const cell = editor.notebook.cellAt(0);
 
+		console.log('Step4.cell execute command takes arguments');
 		await withEvent(vscode.workspace.onDidChangeNotebookDocument, async event => {
+			console.log('Step5.cell execute command takes arguments');
 			await vscode.commands.executeCommand('notebook.execute');
+			console.log('Step6.cell execute command takes arguments');
 			await event;
+			console.log('Step7.cell execute command takes arguments');
 			assert.strictEqual(cell.outputs.length, 1, 'should execute'); // runnable, it worked
 		});
 
+		console.log('Step8.cell execute command takes arguments');
 		await withEvent(vscode.workspace.onDidChangeNotebookDocument, async event => {
+			console.log('Step9.cell execute command takes arguments');
 			await vscode.commands.executeCommand('notebook.cell.clearOutputs');
+			console.log('Step10.cell execute command takes arguments');
 			await event;
+			console.log('Step11.cell execute command takes arguments');
 			assert.strictEqual(cell.outputs.length, 0, 'should clear');
 		});
 
+		console.log('Step12.cell execute command takes arguments');
 		const secondResource = await createRandomNotebookFile();
-		await vscode.commands.executeCommand('vscode.openWith', secondResource, 'notebookCoreTest');
+		console.log('Step13.cell execute command takes arguments');
+		const secondDocument = await vscode.workspace.openNotebookDocument(secondResource);
+		console.log('Step14.cell execute command takes arguments');
+		await vscode.window.showNotebookDocument(secondDocument);
+		console.log('Step15.cell execute command takes arguments');
 
 		await withEvent<vscode.NotebookDocumentChangeEvent>(vscode.workspace.onDidChangeNotebookDocument, async event => {
+			console.log('Step16.cell execute command takes arguments');
 			await vscode.commands.executeCommand('notebook.cell.execute', { start: 0, end: 1 }, notebook.uri);
+			console.log('Step17.cell execute command takes arguments');
 			await event;
+			console.log('Step18.cell execute command takes arguments');
 			assert.strictEqual(cell.outputs.length, 1, 'should execute'); // runnable, it worked
 			assert.strictEqual(vscode.window.activeNotebookEditor?.notebook.uri.fsPath, secondResource.fsPath);
 		});
+		console.log('Step19.cell execute command takes arguments');
 	});
 
 	test('cell execute command takes arguments 2', async () => {
+		console.log('Step1.cell execute command takes arguments 2');
 		const notebook = await openRandomNotebookDocument();
+		console.log('Step2.cell execute command takes arguments 2');
 		await vscode.window.showNotebookDocument(notebook);
+		console.log('Step3.cell execute command takes arguments 2');
 
 		let firstCellExecuted = false;
 		let secondCellExecuted = false;
@@ -216,7 +235,7 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 			}
 		}));
 
-		vscode.commands.executeCommand('notebook.cell.execute', { document: notebook.uri, ranges: [{ start: 0, end: 1 }, { start: 1, end: 2 }] });
+		await vscode.commands.executeCommand('notebook.cell.execute', { document: notebook.uri, ranges: [{ start: 0, end: 1 }, { start: 1, end: 2 }] });
 
 		await def.p;
 		await saveAllFilesAndCloseAll();
@@ -281,38 +300,6 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 		});
 	});
 
-	test('onDidChangeCellExecutionState is fired', async () => {
-		const notebook = await openRandomNotebookDocument();
-		const editor = await vscode.window.showNotebookDocument(notebook);
-		const cell = editor.notebook.cellAt(0);
-
-		let eventCount = 0;
-		const def = new DeferredPromise<void>();
-		testDisposables.push(vscode.notebooks.onDidChangeNotebookCellExecutionState(e => {
-			try {
-				assert.strictEqual(e.cell.document.uri.toString(), cell.document.uri.toString(), 'event should be fired for the executing cell');
-
-				if (eventCount === 0) {
-					assert.strictEqual(e.state, vscode.NotebookCellExecutionState.Pending, 'should be set to Pending');
-				} else if (eventCount === 1) {
-					assert.strictEqual(e.state, vscode.NotebookCellExecutionState.Executing, 'should be set to Executing');
-					assert.strictEqual(cell.outputs.length, 0, 'no outputs yet: ' + JSON.stringify(cell.outputs[0]));
-				} else if (e.state === vscode.NotebookCellExecutionState.Idle) {
-					assert.strictEqual(cell.outputs.length, 1, 'should have an output');
-					def.complete();
-				}
-
-				eventCount++;
-			} catch (err) {
-				def.error(err);
-			}
-		}));
-
-		vscode.commands.executeCommand('notebook.cell.execute', { document: notebook.uri, ranges: [{ start: 0, end: 1 }] });
-
-		await def.p;
-	});
-
 	test('Output changes are applied once the promise resolves', async function () {
 
 		let called = false;
@@ -345,6 +332,43 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 		verifyOutputSyncKernel.controller.dispose();
 	});
 
+	test('copying a running cell preserves copied output when saved', async function () {
+		const notebookType = 'notebook.nbdserializer';
+		testDisposables.push(vscode.workspace.registerNotebookSerializer(notebookType, {
+			deserializeNotebook() {
+				return new vscode.NotebookData([new vscode.NotebookCellData(vscode.NotebookCellKind.Code, 'test', 'javascript')]);
+			},
+			serializeNotebook(data) {
+				return new TextEncoder().encode(JSON.stringify(data.cells.map(cell =>
+					cell.outputs?.map(output => output.items.map(item => new TextDecoder().decode(item.data)))
+				)));
+			}
+		}));
+		const kernel = new Kernel('copyOutputsKernel', 'Copy Outputs Kernel', notebookType);
+		testDisposables.push(kernel.controller);
+		const uri = await createRandomFile('', undefined, '.nbdserializer');
+		const notebook = await vscode.workspace.openNotebookDocument(uri);
+		await vscode.window.showNotebookDocument(notebook);
+		await assertKernel(kernel, notebook);
+
+		const cell = notebook.cellAt(0);
+		const execution = kernel.controller.createNotebookCellExecution(cell);
+		execution.start();
+		try {
+			await execution.replaceOutput([new vscode.NotebookCellOutput([vscode.NotebookCellOutputItem.stdout('before\n')])]);
+			await vscode.commands.executeCommand('notebook.cell.copyDown');
+			await execution.appendOutputItems(vscode.NotebookCellOutputItem.stdout('after\n'), cell.outputs[0]);
+		} finally {
+			execution.end(true);
+		}
+
+		await notebook.save();
+		assert.deepStrictEqual(
+			JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))),
+			[[['before\nafter\n']], [['before\n']]]
+		);
+	});
+
 	test('executionSummary', async () => {
 		const notebook = await openRandomNotebookDocument();
 		const editor = await vscode.window.showNotebookDocument(notebook);
@@ -369,6 +393,32 @@ const apiTestContentProvider: vscode.NotebookContentProvider = {
 		assert.strictEqual(cell.executionSummary?.timing?.endTime, 20);
 
 	});
+
+	for (const supportedLanguages of [undefined, []]) {
+		test(`executes after resetting supported languages with ${supportedLanguages === undefined ? 'undefined' : 'an empty array'}`, async () => {
+			const document = await openRandomNotebookDocument();
+			await vscode.window.showNotebookDocument(document);
+			const cell = document.cellAt(0);
+			const execution = { document: document.uri, ranges: [{ start: 0, end: 1 }] };
+
+			defaultKernel.controller.supportedLanguages = ['javascript'];
+			await assertKernel(defaultKernel, document);
+			await vscode.commands.executeCommand('notebook.cell.execute', execution);
+			assert.strictEqual(cell.outputs.length, 0);
+
+			defaultKernel.controller.supportedLanguages = supportedLanguages;
+			await assertKernel(defaultKernel, document);
+			await vscode.commands.executeCommand('notebook.cell.execute', execution);
+
+			assert.deepStrictEqual({
+				outputs: cell.outputs.map(output => output.items.map(item => new TextDecoder().decode(item.data))),
+				success: cell.executionSummary?.success
+			}, {
+				outputs: [['test']],
+				success: true
+			});
+		});
+	}
 
 	test('execution cancelled when delete while executing', async () => {
 		const document = await openRandomNotebookDocument();

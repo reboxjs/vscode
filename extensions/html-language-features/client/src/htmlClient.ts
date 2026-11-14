@@ -3,13 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nls from 'vscode-nls';
-const localize = nls.loadMessageBundle();
 
 import {
 	languages, ExtensionContext, Position, TextDocument, Range, CompletionItem, CompletionItemKind, SnippetString, workspace, extensions,
 	Disposable, FormattingOptions, CancellationToken, ProviderResult, TextEdit, CompletionContext, CompletionList, SemanticTokensLegend,
-	DocumentSemanticTokensProvider, DocumentRangeSemanticTokensProvider, SemanticTokens, window, commands, OutputChannel
+	DocumentSemanticTokensProvider, DocumentRangeSemanticTokensProvider, SemanticTokens, window, commands, l10n,
+	LogOutputChannel
 } from 'vscode';
 import {
 	LanguageClientOptions, RequestType, DocumentRangeFormattingParams,
@@ -44,7 +43,7 @@ interface AutoInsertParams {
 }
 
 namespace AutoInsertRequest {
-	export const type: RequestType<AutoInsertParams, string, any> = new RequestType('html/autoInsert');
+	export const type: RequestType<AutoInsertParams, string | null, any> = new RequestType('html/autoInsert');
 }
 
 // experimental: semantic tokens
@@ -75,10 +74,10 @@ export interface TelemetryReporter {
 
 export type LanguageClientConstructor = (name: string, description: string, clientOptions: LanguageClientOptions) => BaseLanguageClient;
 
-export const languageServerDescription = localize('htmlserver.name', 'HTML Language Server');
+export const languageServerDescription = l10n.t('HTML Language Server');
 
 export interface Runtime {
-	TextDecoder: { new(encoding?: string): { decode(buffer: ArrayBuffer): string } };
+	TextDecoder: typeof TextDecoder;
 	fileFs?: FileSystemProvider;
 	telemetry?: TelemetryReporter;
 	readonly timer: {
@@ -92,12 +91,12 @@ export interface AsyncDisposable {
 
 export async function startClient(context: ExtensionContext, newLanguageClient: LanguageClientConstructor, runtime: Runtime): Promise<AsyncDisposable> {
 
-	const outputChannel = window.createOutputChannel(languageServerDescription);
+	const logOutputChannel = window.createOutputChannel(languageServerDescription, { log: true });
 
 	const languageParticipants = getLanguageParticipants();
 	context.subscriptions.push(languageParticipants);
 
-	let client: Disposable | undefined = await startClientWithParticipants(languageParticipants, newLanguageClient, outputChannel, runtime);
+	let client: Disposable | undefined = await startClientWithParticipants(languageParticipants, newLanguageClient, logOutputChannel, runtime);
 
 	const promptForLinkedEditingKey = 'html.promptForLinkedEditing';
 	if (extensions.getExtension('formulahendry.auto-rename-tag') !== undefined && (context.globalState.get(promptForLinkedEditingKey) !== false)) {
@@ -107,8 +106,8 @@ export async function startClient(context: ExtensionContext, newLanguageClient: 
 				if (e && languageParticipants.hasLanguage(e.document.languageId)) {
 					context.globalState.update(promptForLinkedEditingKey, false);
 					activeEditorListener.dispose();
-					const configure = localize('configureButton', 'Configure');
-					const res = await window.showInformationMessage(localize('linkedEditingQuestion', 'VS Code now has built-in support for auto-renaming tags. Do you want to enable it?'), configure);
+					const configure = l10n.t('Configure');
+					const res = await window.showInformationMessage(l10n.t('VS Code now has built-in support for auto-renaming tags. Do you want to enable it?'), configure);
 					if (res === configure) {
 						commands.executeCommand('workbench.action.openSettings', SettingIds.linkedEditing);
 					}
@@ -125,12 +124,12 @@ export async function startClient(context: ExtensionContext, newLanguageClient: 
 		}
 		restartTrigger = runtime.timer.setTimeout(async () => {
 			if (client) {
-				outputChannel.appendLine('Extensions have changed, restarting HTML server...');
-				outputChannel.appendLine('');
+				logOutputChannel.info('Extensions have changed, restarting HTML server...');
+				logOutputChannel.info('');
 				const oldClient = client;
 				client = undefined;
 				await oldClient.dispose();
-				client = await startClientWithParticipants(languageParticipants, newLanguageClient, outputChannel, runtime);
+				client = await startClientWithParticipants(languageParticipants, newLanguageClient, logOutputChannel, runtime);
 			}
 		}, 2000);
 	});
@@ -139,12 +138,12 @@ export async function startClient(context: ExtensionContext, newLanguageClient: 
 		dispose: async () => {
 			restartTrigger?.dispose();
 			await client?.dispose();
-			outputChannel.dispose();
+			logOutputChannel.dispose();
 		}
 	};
 }
 
-async function startClientWithParticipants(languageParticipants: LanguageParticipants, newLanguageClient: LanguageClientConstructor, outputChannel: OutputChannel, runtime: Runtime): Promise<AsyncDisposable> {
+async function startClientWithParticipants(languageParticipants: LanguageParticipants, newLanguageClient: LanguageClientConstructor, logOutputChannel: LogOutputChannel, runtime: Runtime): Promise<AsyncDisposable> {
 
 	const toDispose: Disposable[] = [];
 
@@ -157,7 +156,7 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 	const clientOptions: LanguageClientOptions = {
 		documentSelector,
 		synchronize: {
-			configurationSection: ['html', 'css', 'javascript'], // the settings to synchronize
+			configurationSection: ['html', 'css', 'javascript', 'js/ts'], // the settings to synchronize
 		},
 		initializationOptions: {
 			embeddedLanguages,
@@ -180,8 +179,9 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 					}
 					return r;
 				}
-				const isThenable = <T>(obj: ProviderResult<T>): obj is Thenable<T> => obj && (<any>obj)['then'];
-
+				function isThenable<T>(obj: unknown): obj is Thenable<T> {
+					return !!obj && typeof (obj as unknown as Thenable<T>).then === 'function';
+				}
 				const r = next(document, position, context, token);
 				if (isThenable<CompletionItem[] | CompletionList | null | undefined>(r)) {
 					return r.then(updateProposals);
@@ -190,7 +190,7 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 			}
 		}
 	};
-	clientOptions.outputChannel = outputChannel;
+	clientOptions.outputChannel = logOutputChannel;
 
 	// Create the language client and start the client.
 	const client = newLanguageClient('html', languageServerDescription, clientOptions);
@@ -209,7 +209,7 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 	toDispose.push(client.onRequest(CustomDataContent.type, customDataSource.getContent));
 
 
-	const insertRequestor = (kind: 'autoQuote' | 'autoClose', document: TextDocument, position: Position): Promise<string> => {
+	const insertRequestor = (kind: 'autoQuote' | 'autoClose', document: TextDocument, position: Position): Promise<string | null> => {
 		const param: AutoInsertParams = {
 			kind,
 			textDocument: client.code2ProtocolConverter.asTextDocumentIdentifier(document),
@@ -299,14 +299,14 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 				const beginProposal = new CompletionItem('#region', CompletionItemKind.Snippet);
 				beginProposal.range = range;
 				beginProposal.insertText = new SnippetString('<!-- #region $1-->');
-				beginProposal.documentation = localize('folding.start', 'Folding Region Start');
+				beginProposal.documentation = l10n.t('Folding Region Start');
 				beginProposal.filterText = match[2];
 				beginProposal.sortText = 'za';
 				results.push(beginProposal);
 				const endProposal = new CompletionItem('#endregion', CompletionItemKind.Snippet);
 				endProposal.range = range;
 				endProposal.insertText = new SnippetString('<!-- #endregion -->');
-				endProposal.documentation = localize('folding.end', 'Folding Region End');
+				endProposal.documentation = l10n.t('Folding Region End');
 				endProposal.filterText = match[2];
 				endProposal.sortText = 'zb';
 				results.push(endProposal);
@@ -317,21 +317,19 @@ async function startClientWithParticipants(languageParticipants: LanguagePartici
 				const snippetProposal = new CompletionItem('HTML sample', CompletionItemKind.Snippet);
 				snippetProposal.range = range;
 				const content = ['<!DOCTYPE html>',
-					'<html>',
+					'<html lang=\'${1:en}\'>',
 					'<head>',
 					'\t<meta charset=\'utf-8\'>',
-					'\t<meta http-equiv=\'X-UA-Compatible\' content=\'IE=edge\'>',
-					'\t<title>${1:Page Title}</title>',
 					'\t<meta name=\'viewport\' content=\'width=device-width, initial-scale=1\'>',
-					'\t<link rel=\'stylesheet\' type=\'text/css\' media=\'screen\' href=\'${2:main.css}\'>',
-					'\t<script src=\'${3:main.js}\'></script>',
+					'\t<title>${2:Page Title}</title>',
+					'\t<link rel=\'stylesheet\' href=\'${3:main.css}\'>',
 					'</head>',
 					'<body>',
 					'\t$0',
 					'</body>',
 					'</html>'].join('\n');
 				snippetProposal.insertText = new SnippetString(content);
-				snippetProposal.documentation = localize('folding.html', 'Simple HTML5 starting point');
+				snippetProposal.documentation = l10n.t('Simple HTML5 starting point');
 				snippetProposal.filterText = match2[2];
 				snippetProposal.sortText = 'za';
 				results.push(snippetProposal);

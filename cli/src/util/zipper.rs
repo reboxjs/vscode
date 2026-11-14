@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 use super::errors::{wrap, WrappedError};
+use super::extract_safety::{
+	ensure_canonical_within_root, prepare_extraction_root, safe_extract_join,
+};
 use super::io::ReportCopyProgress;
 use std::fs::{self, File};
 use std::io;
@@ -16,140 +19,155 @@ use zip::{self, ZipArchive};
 /// Returns whether all files in the archive start with the same path segment.
 /// If so, it's an indication we should skip that segment when extracting.
 fn should_skip_first_segment(archive: &mut ZipArchive<File>) -> bool {
-    let first_name = {
-        let file = archive
-            .by_index_raw(0)
-            .expect("expected not to have an empty archive");
+	let first_name = {
+		let file = archive
+			.by_index_raw(0)
+			.expect("expected not to have an empty archive");
 
-        let path = file
-            .enclosed_name()
-            .expect("expected to have path")
-            .iter()
-            .next()
-            .expect("expected to have non-empty name");
+		let path = file
+			.enclosed_name()
+			.expect("expected to have path")
+			.iter()
+			.next()
+			.expect("expected to have non-empty name");
 
-        path.to_owned()
-    };
+		path.to_owned()
+	};
 
-    for i in 1..archive.len() {
-        if let Ok(file) = archive.by_index_raw(i) {
-            if let Some(name) = file.enclosed_name() {
-                if name.iter().next() != Some(&first_name) {
-                    return false;
-                }
-            }
-        }
-    }
+	for i in 1..archive.len() {
+		if let Ok(file) = archive.by_index_raw(i) {
+			if let Some(name) = file.enclosed_name() {
+				if name.iter().next() != Some(&first_name) {
+					return false;
+				}
+			}
+		}
+	}
 
-    true
+	archive.len() > 1 // prefix removal is invalid if there's only a single file
 }
 
-pub fn unzip_file<T>(path: &Path, parent_path: &Path, mut reporter: T) -> Result<(), WrappedError>
+pub fn unzip_file<T>(file: File, parent_path: &Path, mut reporter: T) -> Result<(), WrappedError>
 where
-    T: ReportCopyProgress,
+	T: ReportCopyProgress,
 {
-    let file = fs::File::open(path)
-        .map_err(|e| wrap(e, format!("unable to open file {}", path.display())))?;
+	let mut archive =
+		zip::ZipArchive::new(file).map_err(|e| wrap(e, "failed to open zip archive"))?;
 
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| wrap(e, format!("failed to open zip archive {}", path.display())))?;
+	let canonical_root = prepare_extraction_root(parent_path)?;
 
-    let skip_segments_no = if should_skip_first_segment(&mut archive) {
-        1
-    } else {
-        0
-    };
+	let skip_segments_no = usize::from(should_skip_first_segment(&mut archive));
+	let report_progress_every = (archive.len() / 20).max(1);
 
-    for i in 0..archive.len() {
-        reporter.report_progress(i as u64, archive.len() as u64);
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| wrap(e, format!("could not open zip entry {}", i)))?;
+	for i in 0..archive.len() {
+		if i % report_progress_every == 0 {
+			reporter.report_progress(i as u64, archive.len() as u64);
+		}
+		let mut file = archive
+			.by_index(i)
+			.map_err(|e| wrap(e, format!("could not open zip entry {i}")))?;
 
-        let outpath: PathBuf = match file.enclosed_name() {
-            Some(path) => {
-                let mut full_path = PathBuf::from(parent_path);
-                full_path.push(PathBuf::from_iter(path.iter().skip(skip_segments_no)));
-                full_path
-            }
-            None => continue,
-        };
+		let outpath: PathBuf = match file.enclosed_name() {
+			Some(path) => {
+				let relative: PathBuf = path.iter().skip(skip_segments_no).collect();
+				// Skip bare top-level directory entries that become empty once
+				// their single segment has been stripped. Only directory entries
+				// are skipped; non-directory entries with an empty relative path
+				// fall through to `safe_extract_join`, which rejects them.
+				if relative.as_os_str().is_empty()
+					&& (file.is_dir() || file.name().ends_with('/'))
+				{
+					continue;
+				}
+				safe_extract_join(&canonical_root, &relative)?
+			}
+			None => continue,
+		};
 
-        if file.is_dir() || file.name().ends_with('/') {
-            fs::create_dir_all(&outpath)
-                .map_err(|e| wrap(e, format!("could not create dir for {}", outpath.display())))?;
-            apply_permissions(&file, &outpath)?;
-            continue;
-        }
+		if file.is_dir() || file.name().ends_with('/') {
+			fs::create_dir_all(&outpath)
+				.map_err(|e| wrap(e, format!("could not create dir for {}", outpath.display())))?;
+			ensure_canonical_within_root(&canonical_root, &outpath)?;
+			apply_permissions(&file, &outpath)?;
+			continue;
+		}
 
-        if let Some(p) = outpath.parent() {
-            fs::create_dir_all(&p)
-                .map_err(|e| wrap(e, format!("could not create dir for {}", outpath.display())))?;
-        }
+		if let Some(p) = outpath.parent() {
+			fs::create_dir_all(p)
+				.map_err(|e| wrap(e, format!("could not create dir for {}", outpath.display())))?;
+			ensure_canonical_within_root(&canonical_root, p)?;
+		}
 
-        #[cfg(unix)]
-        {
-            use libc::S_IFLNK;
-            use std::io::Read;
-            use std::os::unix::ffi::OsStringExt;
+		#[cfg(unix)]
+		{
+			use super::extract_safety::validate_symlink_target;
+			use libc::S_IFLNK;
+			use std::io::Read;
+			use std::os::unix::ffi::OsStringExt;
 
-            if matches!(file.unix_mode(), Some(mode) if mode & (S_IFLNK as u32) == (S_IFLNK as u32))
-            {
-                let mut link_to = Vec::new();
-                file.read_to_end(&mut link_to).map_err(|e| {
-                    wrap(
-                        e,
-                        format!("could not read symlink linkpath {}", outpath.display()),
-                    )
-                })?;
+			#[cfg(target_os = "macos")]
+			const S_IFLINK_32: u32 = S_IFLNK as u32;
 
-                let link_path = PathBuf::from(std::ffi::OsString::from_vec(link_to));
-                std::os::unix::fs::symlink(link_path, &outpath).map_err(|e| {
-                    wrap(e, format!("could not create symlink {}", outpath.display()))
-                })?;
-                continue;
-            }
-        }
+			#[cfg(target_os = "linux")]
+			const S_IFLINK_32: u32 = S_IFLNK;
 
-        let mut outfile = fs::File::create(&outpath).map_err(|e| {
-            wrap(
-                e,
-                format!(
-                    "unable to open file to write {} (from {:?})",
-                    outpath.display(),
-                    file.enclosed_name().map(|p| p.to_string_lossy()),
-                ),
-            )
-        })?;
+			if matches!(file.unix_mode(), Some(mode) if mode & S_IFLINK_32 == S_IFLINK_32) {
+				let mut link_to = Vec::new();
+				file.read_to_end(&mut link_to).map_err(|e| {
+					wrap(
+						e,
+						format!("could not read symlink linkpath {}", outpath.display()),
+					)
+				})?;
 
-        io::copy(&mut file, &mut outfile)
-            .map_err(|e| wrap(e, format!("error copying file {}", outpath.display())))?;
+				let link_path = PathBuf::from(std::ffi::OsString::from_vec(link_to));
+				validate_symlink_target(&canonical_root, &outpath, &link_path)?;
+				std::os::unix::fs::symlink(link_path, &outpath).map_err(|e| {
+					wrap(e, format!("could not create symlink {}", outpath.display()))
+				})?;
+				continue;
+			}
+		}
 
-        apply_permissions(&file, &outpath)?;
-    }
+		let mut outfile = fs::File::create(&outpath).map_err(|e| {
+			wrap(
+				e,
+				format!(
+					"unable to open file to write {} (from {:?})",
+					outpath.display(),
+					file.enclosed_name().map(|p| p.to_string_lossy()),
+				),
+			)
+		})?;
 
-    reporter.report_progress(archive.len() as u64, archive.len() as u64);
+		io::copy(&mut file, &mut outfile)
+			.map_err(|e| wrap(e, format!("error copying file {}", outpath.display())))?;
 
-    Ok(())
+		apply_permissions(&file, &outpath)?;
+	}
+
+	reporter.report_progress(archive.len() as u64, archive.len() as u64);
+
+	Ok(())
 }
 
 #[cfg(unix)]
 fn apply_permissions(file: &ZipFile, outpath: &Path) -> Result<(), WrappedError> {
-    use std::os::unix::fs::PermissionsExt;
+	use std::os::unix::fs::PermissionsExt;
 
-    if let Some(mode) = file.unix_mode() {
-        fs::set_permissions(&outpath, fs::Permissions::from_mode(mode)).map_err(|e| {
-            wrap(
-                e,
-                format!("error setting permissions on {}", outpath.display()),
-            )
-        })?;
-    }
+	if let Some(mode) = file.unix_mode() {
+		fs::set_permissions(outpath, fs::Permissions::from_mode(mode)).map_err(|e| {
+			wrap(
+				e,
+				format!("error setting permissions on {}", outpath.display()),
+			)
+		})?;
+	}
 
-    Ok(())
+	Ok(())
 }
 
 #[cfg(windows)]
 fn apply_permissions(_file: &ZipFile, _outpath: &Path) -> Result<(), WrappedError> {
-    Ok(())
+	Ok(())
 }

@@ -3,12 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { MainContext, MainThreadBulkEditsShape } from 'vs/workbench/api/common/extHost.protocol';
-import { ExtHostDocumentsAndEditors } from 'vs/workbench/api/common/extHostDocumentsAndEditors';
-import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
-import { WorkspaceEdit } from 'vs/workbench/api/common/extHostTypeConverters';
-import { isProposedApiEnabled } from 'vs/workbench/services/extensions/common/extensions';
+import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
+import { MainContext, MainThreadBulkEditsShape } from './extHost.protocol.js';
+import { ExtHostDocumentsAndEditors } from './extHostDocumentsAndEditors.js';
+import { IExtHostRpcService } from './extHostRpcService.js';
+import { WorkspaceEdit } from './extHostTypeConverters.js';
+import { SerializableObjectWithBuffers } from '../../services/extensions/common/proxyIdentifier.js';
 import type * as vscode from 'vscode';
 
 export class ExtHostBulkEdits {
@@ -29,12 +29,7 @@ export class ExtHostBulkEdits {
 	}
 
 	applyWorkspaceEdit(edit: vscode.WorkspaceEdit, extension: IExtensionDescription, metadata: vscode.WorkspaceEditMetadata | undefined): Promise<boolean> {
-		const allowIsRefactoring = isProposedApiEnabled(extension, 'workspaceEditIsRefactoring');
-		if (metadata && !allowIsRefactoring) {
-			console.warn(`Extension '${extension.identifier.value}' uses a proposed API 'workspaceEditIsRefactoring' which is NOT enabled for it`);
-			metadata = undefined;
-		}
-		const dto = WorkspaceEdit.from(edit, this._versionInformationProvider);
+		const dto = new SerializableObjectWithBuffers(WorkspaceEdit.from(edit, this._versionInformationProvider));
 		return this._proxy.$tryApplyWorkspaceEdit(dto, undefined, metadata?.isRefactoring ?? false);
 	}
 }

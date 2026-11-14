@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
+import Tracer from '../logging/tracer';
 import { getTempFile } from '../utils/temp.electron';
-import Tracer from '../utils/tracer';
 import { OngoingRequestCanceller, OngoingRequestCancellerFactory } from './cancellation';
 
 export class NodeRequestCanceller implements OngoingRequestCanceller {
@@ -22,8 +22,9 @@ export class NodeRequestCanceller implements OngoingRequestCanceller {
 		if (!this.cancellationPipeName) {
 			return false;
 		}
-		this._tracer.logTrace(this._serverId, `TypeScript Server: trying to cancel ongoing request with sequence number ${seq}`);
+		this._tracer.trace(this._serverId, `TypeScript Server: trying to cancel ongoing request with sequence number ${seq}`);
 		try {
+			// eslint-disable-next-line local/code-no-sync-fs -- tryCancelOngoingRequest returns whether cancellation was signaled; an unawaited write could report success before the marker exists or after a write failure.
 			fs.writeFileSync(this.cancellationPipeName + seq, '');
 		} catch {
 			// noop

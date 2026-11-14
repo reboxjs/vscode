@@ -3,20 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Barrier, isThenable, RunOnceScheduler } from 'vs/base/common/async';
-import { Emitter } from 'vs/base/common/event';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { assertNever } from 'vs/base/common/assert';
-import { applyTestItemUpdate, ITestItem, ITestTag, namespaceTestTag, TestDiffOpType, TestItemExpandState, TestsDiff, TestsDiffOp } from 'vs/workbench/contrib/testing/common/testTypes';
-import { TestId } from 'vs/workbench/contrib/testing/common/testId';
-import { URI } from 'vs/base/common/uri';
+import { Barrier, isThenable, RunOnceScheduler } from '../../../../base/common/async.js';
+import { Emitter } from '../../../../base/common/event.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { assertNever } from '../../../../base/common/assert.js';
+import { applyTestItemUpdate, ITestItem, ITestTag, namespaceTestTag, TestDiffOpType, TestItemExpandState, TestsDiff, TestsDiffOp } from './testTypes.js';
+import { TestId } from './testId.js';
+import { URI } from '../../../../base/common/uri.js';
+import { toErrorMessage } from '../../../../base/common/errorMessage.js';
 
 /**
  * @private
  */
 interface CollectionItem<T> {
 	readonly fullId: TestId;
-	readonly parent: TestId | null;
 	actual: T;
 	expand: TestItemExpandState;
 	/**
@@ -24,6 +24,7 @@ interface CollectionItem<T> {
 	 */
 	expandLevels?: number;
 	resolveBarrier?: Barrier;
+	resolveError?: string;
 }
 
 export const enum TestItemEventOp {
@@ -116,6 +117,7 @@ const diffableProps: { [K in keyof ITestItem]?: (a: ITestItem[K], b: ITestItem[K
 	label: strictEqualComparator,
 	description: strictEqualComparator,
 	error: strictEqualComparator,
+	sortText: strictEqualComparator,
 	tags: (a, b) => {
 		if (a.length !== b.length) {
 			return false;
@@ -129,9 +131,11 @@ const diffableProps: { [K in keyof ITestItem]?: (a: ITestItem[K], b: ITestItem[K
 	},
 };
 
+const diffableEntries = Object.entries(diffableProps) as readonly [keyof ITestItem, (a: unknown, b: unknown) => boolean][];
+
 const diffTestItems = (a: ITestItem, b: ITestItem) => {
 	let output: Record<string, unknown> | undefined;
-	for (const [key, cmp] of Object.entries(diffableProps) as [keyof ITestItem, (a: any, b: any) => boolean][]) {
+	for (const [key, cmp] of diffableEntries) {
 		if (!cmp(a[key], b[key])) {
 			if (output) {
 				output[key] = b[key];
@@ -183,10 +187,19 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 	 * Handler used for expanding test items.
 	 */
 	public set resolveHandler(handler: undefined | ((item: T | undefined) => void)) {
+		const changed = this._resolveHandler !== handler;
 		this._resolveHandler = handler;
 		for (const test of this.tree.values()) {
+			if (test.resolveError !== undefined || (changed && test.resolveBarrier?.isOpen() === false)) {
+				test.resolveBarrier = undefined;
+				this.setResolveError(test, undefined);
+			}
 			this.updateExpandability(test);
 		}
+	}
+
+	public get resolveHandler() {
+		return this._resolveHandler;
 	}
 
 	/**
@@ -265,7 +278,7 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 			return !r.isOpen()
 				? r.wait().then(() => this.expandChildren(internal, levels - 1))
 				: this.expandChildren(internal, levels - 1);
-		} else if (internal.expand === TestItemExpandState.Expanded) {
+		} else if (internal.expand === TestItemExpandState.Expanded || internal.expand === TestItemExpandState.BusyExpanding) {
 			return internal.resolveBarrier?.isOpen() === false
 				? internal.resolveBarrier.wait().then(() => this.expandChildren(internal, levels - 1))
 				: this.expandChildren(internal, levels - 1);
@@ -311,7 +324,9 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 					op: TestDiffOpType.Update,
 					item: {
 						extId: internal.fullId.toString(),
-						item: evt.update,
+						item: evt.update.error === null && internal.resolveError !== undefined
+							? { ...evt.update, error: internal.resolveError }
+							: evt.update,
 					}
 				});
 				break;
@@ -335,7 +350,7 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 		}
 	}
 
-	private upsertItem(actual: T, parent: CollectionItem<T> | undefined) {
+	private upsertItem(actual: T, parent: CollectionItem<T> | undefined): void {
 		const fullId = TestId.fromExtHostTestItem(actual, this.root.id, parent?.actual);
 
 		// If this test item exists elsewhere in the tree already (exists at an
@@ -351,7 +366,6 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 			internal = {
 				fullId,
 				actual,
-				parent: parent ? fullId.parentId : null,
 				expandLevels: parent?.expandLevels /* intentionally undefined or 0 */ ? parent.expandLevels - 1 : undefined,
 				expand: TestItemExpandState.NotExpandable, // updated by `connectItemAndChildren`
 			};
@@ -362,7 +376,6 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 			this.pushDiff({
 				op: TestDiffOpType.Add,
 				item: {
-					parent: internal.parent && internal.parent.toString(),
 					controllerId: this.options.controllerId,
 					expand: internal.expand,
 					item: this.options.toITestItem(actual),
@@ -380,12 +393,22 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 		}
 
 		// Case 3: upsert of an existing item by ID, with a new instance
+		if (internal.actual.uri?.toString() !== actual.uri?.toString()) {
+			// If the item has a new URI, re-insert it; we don't support updating
+			// URIs on existing test items.
+			this.removeItem(fullId.toString());
+			return this.upsertItem(actual, parent);
+		}
 		const oldChildren = this.options.getChildren(internal.actual);
 		const oldActual = internal.actual;
-		const update = diffTestItems(this.options.toITestItem(oldActual), this.options.toITestItem(actual));
+		const oldItem = { ...this.options.toITestItem(oldActual) };
+		oldItem.error ??= internal.resolveError ?? null;
+		const update = diffTestItems(oldItem, this.options.toITestItem(actual));
 		this.options.getApiFor(oldActual).listener = undefined;
 
 		internal.actual = actual;
+		internal.resolveBarrier = undefined;
+		internal.resolveError = undefined;
 		internal.expand = TestItemExpandState.NotExpandable; // updated by `connectItemAndChildren`
 
 		if (update) {
@@ -404,6 +427,19 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 			if (!this.options.getChildren(actual).get(child.id)) {
 				this.removeItem(TestId.joinToString(fullId, child.id));
 			}
+		}
+
+		// Re-expand the element if it was previous expanded (#207574)
+		const expandLevels = internal.expandLevels;
+		if (expandLevels !== undefined) {
+			// Wait until a microtask to allow the extension to finish setting up
+			// properties of the element and children before we ask it to expand.
+			queueMicrotask(() => {
+				if (internal.expand === TestItemExpandState.Expandable) {
+					internal.expandLevels = undefined;
+					this.expand(fullId.toString(), expandLevels);
+				}
+			});
 		}
 
 		// Mark ranges in the document as synced (#161320)
@@ -541,11 +577,21 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 		this.pushExpandStateUpdate(internal);
 
 		const barrier = internal.resolveBarrier = new Barrier();
+		const isCurrent = () => this.tree.get(internal.fullId.toString()) === internal && internal.resolveBarrier === barrier;
 		const applyError = (err: Error) => {
 			console.error(`Unhandled error in resolveHandler of test controller "${this.options.controllerId}"`, err);
+			if (isCurrent()) {
+				this.setResolveError(internal, toErrorMessage(err));
+			}
+		};
+		const finish = () => {
+			barrier.open();
+			if (isCurrent()) {
+				this.updateExpandability(internal);
+			}
 		};
 
-		let r: Thenable<void> | void;
+		let r: Thenable<void> | undefined | void;
 		try {
 			r = this._resolveHandler(internal.actual === this.root ? undefined : internal.actual);
 		} catch (err) {
@@ -553,16 +599,25 @@ export class TestItemCollection<T extends ITestItemLike> extends Disposable {
 		}
 
 		if (isThenable(r)) {
-			r.catch(applyError).then(() => {
-				barrier.open();
-				this.updateExpandability(internal);
-			});
+			r.catch(applyError).then(finish);
 		} else {
-			barrier.open();
-			this.updateExpandability(internal);
+			finish();
 		}
 
-		return internal.resolveBarrier;
+		return barrier;
+	}
+
+	private setResolveError(internal: CollectionItem<T>, error: string | undefined) {
+		const providerError = this.options.toITestItem(internal.actual).error;
+		const previousError = providerError ?? internal.resolveError ?? null;
+		internal.resolveError = error;
+		const currentError = providerError ?? error ?? null;
+		if (currentError !== previousError) {
+			this.pushDiff({
+				op: TestDiffOpType.Update,
+				item: { extId: internal.fullId.toString(), item: { error: currentError } },
+			});
+		}
 	}
 
 	private pushExpandStateUpdate(internal: CollectionItem<T>) {
@@ -667,7 +722,7 @@ export const createTestItemChildren = <T extends ITestItemLike>(api: ITestItemAp
 
 			for (const item of items) {
 				if (!(item instanceof checkCtor)) {
-					throw new InvalidTestItemError(item.id);
+					throw new InvalidTestItemError((item as ITestItemLike).id);
 				}
 
 				const itemController = getApi(item).controllerId;
@@ -699,7 +754,7 @@ export const createTestItemChildren = <T extends ITestItemLike>(api: ITestItemAp
 		/** @inheritdoc */
 		add(item: T) {
 			if (!(item instanceof checkCtor)) {
-				throw new InvalidTestItemError(item.id);
+				throw new InvalidTestItemError((item as ITestItemLike).id);
 			}
 
 			mapped.set(item.id, item);

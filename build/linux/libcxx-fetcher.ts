@@ -3,23 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Can be removed once https://github.com/electron/electron-rebuild/pull/703 is available.
-
-import * as debug from 'debug';
-import * as extract from 'extract-zip';
-import * as fs from 'fs-extra';
-import * as path from 'path';
-import * as packageJSON from '../../package.json';
+import fs from 'fs';
+import path from 'path';
+import debug from 'debug';
+import extract from 'extract-zip';
 import { downloadArtifact } from '@electron/get';
+import { getElectronVersion } from '../lib/electronVersion.ts';
 
 const d = debug('libcxx-fetcher');
 
 export async function downloadLibcxxHeaders(outDir: string, electronVersion: string, lib_name: string): Promise<void> {
-	if (await fs.pathExists(path.resolve(outDir, 'include'))) {
+	if (await fs.existsSync(path.resolve(outDir, 'include'))) {
 		return;
 	}
-	if (!await fs.pathExists(outDir)) {
-		await fs.mkdirp(outDir);
+	if (!await fs.existsSync(outDir)) {
+		await fs.mkdirSync(outDir, { recursive: true });
 	}
 
 	d(`downloading ${lib_name}_headers`);
@@ -34,11 +32,11 @@ export async function downloadLibcxxHeaders(outDir: string, electronVersion: str
 }
 
 export async function downloadLibcxxObjects(outDir: string, electronVersion: string, targetArch: string = 'x64'): Promise<void> {
-	if (await fs.pathExists(path.resolve(outDir, 'libc++.a'))) {
+	if (await fs.existsSync(path.resolve(outDir, 'libc++.a'))) {
 		return;
 	}
-	if (!await fs.pathExists(outDir)) {
-		await fs.mkdirp(outDir);
+	if (!await fs.existsSync(outDir)) {
+		await fs.mkdirSync(outDir, { recursive: true });
 	}
 
 	d(`downloading libcxx-objects-linux-${targetArch}`);
@@ -58,7 +56,7 @@ async function main(): Promise<void> {
 	const libcxxHeadersDownloadDir = process.env['VSCODE_LIBCXX_HEADERS_DIR'];
 	const libcxxabiHeadersDownloadDir = process.env['VSCODE_LIBCXXABI_HEADERS_DIR'];
 	const arch = process.env['VSCODE_ARCH'];
-	const electronVersion = packageJSON.devDependencies.electron;
+	const { electronVersion } = getElectronVersion();
 
 	if (!libcxxObjectsDirPath || !libcxxHeadersDownloadDir || !libcxxabiHeadersDownloadDir) {
 		throw new Error('Required build env not set');
@@ -69,7 +67,7 @@ async function main(): Promise<void> {
 	await downloadLibcxxHeaders(libcxxabiHeadersDownloadDir, electronVersion, 'libcxxabi');
 }
 
-if (require.main === module) {
+if (import.meta.main) {
 	main().catch(err => {
 		console.error(err);
 		process.exit(1);

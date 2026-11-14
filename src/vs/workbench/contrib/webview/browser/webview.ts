@@ -3,18 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Dimension } from 'vs/base/browser/dom';
-import { IMouseWheelEvent } from 'vs/base/browser/mouseEvent';
-import { equals } from 'vs/base/common/arrays';
-import { Event } from 'vs/base/common/event';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { isEqual } from 'vs/base/common/resources';
-import { URI } from 'vs/base/common/uri';
-import { IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IWebviewPortMapping } from 'vs/platform/webview/common/webviewPortMapping';
-import { WebviewInitInfo } from 'vs/workbench/contrib/webview/browser/webviewElement';
+import { IMouseWheelEvent } from '../../../../base/browser/mouseEvent.js';
+import { CodeWindow } from '../../../../base/browser/window.js';
+import { IAction } from '../../../../base/common/actions.js';
+import { equals } from '../../../../base/common/arrays.js';
+import { Event } from '../../../../base/common/event.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { IObservable } from '../../../../base/common/observable.js';
+import { isEqual } from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
+import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { ExtensionIdentifier } from '../../../../platform/extensions/common/extensions.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IWebviewPortMapping } from '../../../../platform/webview/common/webviewPortMapping.js';
+import { Memento } from '../../../common/memento.js';
 
 /**
  * Set when the find widget in a webview in a webview is visible.
@@ -65,10 +69,23 @@ export interface IWebviewService {
 	createWebviewOverlay(initInfo: WebviewInitInfo): IOverlayWebview;
 }
 
+export interface WebviewInitInfo {
+	readonly providedViewType?: string;
+	readonly origin?: string;
+
+	readonly title: string | undefined;
+
+	readonly options: WebviewOptions;
+	readonly contentOptions: WebviewContentOptions;
+
+	readonly extension: WebviewExtensionDescription | undefined;
+}
+
 export const enum WebviewContentPurpose {
 	NotebookRenderer = 'notebookRenderer',
 	CustomEditor = 'customEditor',
 	WebviewView = 'webviewView',
+	ChatOutputItem = 'chatOutputItem',
 }
 
 export type WebviewStyles = { readonly [key: string]: string | number };
@@ -80,14 +97,23 @@ export interface WebviewOptions {
 	readonly purpose?: WebviewContentPurpose;
 	readonly customClasses?: string;
 	readonly enableFindWidget?: boolean;
+
+	/**
+	 * Disable the service worker used for loading local resources in the webview.
+	 */
+	readonly disableServiceWorker?: boolean;
+
+	/** Round up intrinsic height and include native horizontal scrollbar space for auto-sized content. */
+	readonly includeHorizontalScrollbarInContentHeight?: boolean;
+
 	readonly tryRestoreScrollPosition?: boolean;
 	readonly retainContextWhenHidden?: boolean;
 	transformCssVariables?(styles: WebviewStyles): WebviewStyles;
+
+	/** Host-owned actions prepended to this webview's context menu. */
+	getContextMenuActions?(): IAction[];
 }
 
-/**
- *
- */
 export interface WebviewContentOptions {
 	/**
 	 * Should the webview allow `acquireVsCodeApi` to be called multiple times? Defaults to false.
@@ -105,6 +131,18 @@ export interface WebviewContentOptions {
 	readonly allowForms?: boolean;
 
 	/**
+	 * Should untrusted key events from the webview be forwarded to the workbench? Defaults to false.
+	 *
+	 * This blocks keypress events that are triggered by scripts. Webviews should not allow untrusted scripts
+	 * to be run, so this is more of a defense-in-depth measure.
+	 *
+	 * There are valid reasons to enable this, such as when a webview embeds an iframe. In those cases, keyboard events can
+	 * be eaten by the iframe, so the inner iframe needs to forward keyboard events to the parent webview,
+	 * which then needs to forward them to the workbench.
+	 */
+	readonly forwardUntrustedKeypressEvents?: boolean;
+
+	/**
 	 * Set of root paths from which the webview can load local resources.
 	 */
 	readonly localResourceRoots?: readonly URI[];
@@ -116,8 +154,10 @@ export interface WebviewContentOptions {
 
 	/**
 	 * Are command uris enabled in the webview? Defaults to false.
+	 *
+	 * TODO: This is only supported by mainThreadWebviews and should be removed from here.
 	 */
-	readonly enableCommandUris?: boolean;
+	readonly enableCommandUris?: boolean | readonly string[];
 }
 
 /**
@@ -128,20 +168,28 @@ export function areWebviewContentOptionsEqual(a: WebviewContentOptions, b: Webvi
 		a.allowMultipleAPIAcquire === b.allowMultipleAPIAcquire
 		&& a.allowScripts === b.allowScripts
 		&& a.allowForms === b.allowForms
+		&& a.forwardUntrustedKeypressEvents === b.forwardUntrustedKeypressEvents
 		&& equals(a.localResourceRoots, b.localResourceRoots, isEqual)
 		&& equals(a.portMapping, b.portMapping, (a, b) => a.extensionHostPort === b.extensionHostPort && a.webviewPort === b.webviewPort)
-		&& a.enableCommandUris === b.enableCommandUris
+		&& areEnableCommandUrisEqual(a, b)
 	);
+}
+
+function areEnableCommandUrisEqual(a: WebviewContentOptions, b: WebviewContentOptions): boolean {
+	if (a.enableCommandUris === b.enableCommandUris) {
+		return true;
+	}
+
+	if (Array.isArray(a.enableCommandUris) && Array.isArray(b.enableCommandUris)) {
+		return equals(a.enableCommandUris, b.enableCommandUris);
+	}
+
+	return false;
 }
 
 export interface WebviewExtensionDescription {
 	readonly location?: URI;
 	readonly id: ExtensionIdentifier;
-}
-
-export interface IDataLinkClickEvent {
-	readonly dataURL: string;
-	readonly downloadName?: string;
 }
 
 export interface WebviewMessageReceivedEvent {
@@ -152,24 +200,42 @@ export interface WebviewMessageReceivedEvent {
 export interface IWebview extends IDisposable {
 
 	/**
-	 * External identifier of this webview.
-	 */
-	readonly id: string;
-
-	/**
-	 * The origin this webview itself is loaded from. May not be unique
-	 */
-	readonly origin: string;
-
-	/**
 	 * The original view type of the webview.
 	 */
 	readonly providedViewType?: string;
 
-	html: string;
+	/**
+	 * The origin this webview itself is loaded from. May not be unique.
+	 */
+	readonly origin: string;
+
+	/**
+	 * Set html content of the webview.
+	 */
+	setHtml(html: string): void;
+
+	/**
+	 * Set the title of the webview. This is set on the webview's iframe element.
+	 */
+	setTitle(title: string): void;
+
+	/**
+	 * Control what content is allowed/blocked inside the webview.
+	 */
 	contentOptions: WebviewContentOptions;
+
+	/**
+	 * List of roots from which local resources can be loaded.
+	 *
+	 * Requests for local resources not in this list are blocked.
+	 */
 	localResourcesRoot: readonly URI[];
+
+	/**
+	 * The extension that created/owns this webview.
+	 */
 	extension: WebviewExtensionDescription | undefined;
+
 	initialScrollProgress: number;
 	state: string | undefined;
 
@@ -177,23 +243,40 @@ export interface IWebview extends IDisposable {
 
 	readonly onDidFocus: Event<void>;
 	readonly onDidBlur: Event<void>;
+
+	/**
+	 * Fired when the webview is disposed of.
+	 */
 	readonly onDidDispose: Event<void>;
 
 	readonly onDidClickLink: Event<string>;
 	readonly onDidScroll: Event<{ readonly scrollYPercentage: number }>;
 	readonly onDidWheel: Event<IMouseWheelEvent>;
+
 	readonly onDidUpdateState: Event<string | undefined>;
-	readonly onDidReload: Event<void>;
-	readonly onMessage: Event<WebviewMessageReceivedEvent>;
+
+	/**
+	 * The natural size of the content inside the webview.
+	 *
+	 * This is computed by looking at the size of the webview's the document element.
+	 */
+	readonly intrinsicContentSize: IObservable<{ readonly width: number; readonly height: number } | undefined>;
+
+	/**
+	 * Fired when the webview cannot be loaded or is now in a non-functional state.
+	 */
+	readonly onFatalError: Event<{ readonly message: string }>;
 	readonly onMissingCsp: Event<ExtensionIdentifier>;
+
+	readonly onMessage: Event<WebviewMessageReceivedEvent>;
 
 	postMessage(message: any, transfer?: readonly ArrayBuffer[]): Promise<boolean>;
 
 	focus(): void;
 	reload(): void;
 
-	showFind(): void;
-	hideFind(): void;
+	showFind(animated?: boolean): void;
+	hideFind(animated?: boolean): void;
 	runFindAction(previous: boolean): void;
 
 	selectAll(): void;
@@ -221,7 +304,9 @@ export interface IWebviewElement extends IWebview {
 	 *
 	 * @param parent Element to append the webview to.
 	 */
-	mountTo(parent: HTMLElement): void;
+	mountTo(parent: HTMLElement, targetWindow: CodeWindow): void;
+
+	reinitializeAfterDismount(): void;
 }
 
 /**
@@ -239,6 +324,8 @@ export interface IOverlayWebview extends IWebview {
 	 */
 	readonly container: HTMLElement;
 
+	origin: string;
+
 	options: WebviewOptions;
 
 	/**
@@ -249,7 +336,7 @@ export interface IOverlayWebview extends IWebview {
 	 * @param claimant Identifier for the object claiming the webview.
 	 *   This must match the `claimant` passed to {@link IOverlayWebview.release}.
 	 */
-	claim(claimant: any, scopedContextKeyService: IContextKeyService | undefined): void;
+	claim(claimant: any, targetWindow: CodeWindow, scopedContextKeyService: IContextKeyService | undefined): void;
 
 	/**
 	 * Release ownership of the webview.
@@ -263,12 +350,69 @@ export interface IOverlayWebview extends IWebview {
 	release(claimant: any): void;
 
 	/**
-	 * Absolutely position the webview on top of another element in the DOM.
+	 * Sets the webview to be absolutely positioned on top of another element in the DOM.
 	 *
 	 * @param element Element to position the webview on top of. This element should
 	 *   be an placeholder for the webview since the webview will entirely cover it.
-	 * @param dimension Optional explicit dimensions to use for sizing the webview.
 	 * @param clippingContainer Optional container to clip the webview to. This should generally be a parent of `element`.
 	 */
-	layoutWebviewOverElement(element: HTMLElement, dimension?: Dimension, clippingContainer?: HTMLElement): void;
+	setAnchorElement(element: HTMLElement, clippingContainer?: HTMLElement): void;
+}
+
+/**
+ * Stores the unique origins for a webview.
+ *
+ * These are randomly generated
+ */
+export class WebviewOriginStore {
+
+	private readonly _memento: Memento<Record<string, string>>;
+	private readonly _state: Record<string, string | undefined>;
+
+	constructor(
+		rootStorageKey: string,
+		@IStorageService storageService: IStorageService,
+	) {
+		this._memento = new Memento(rootStorageKey, storageService);
+		this._state = this._memento.getMemento(StorageScope.APPLICATION, StorageTarget.MACHINE);
+	}
+
+	public getOrigin(viewType: string, additionalKey: string | undefined): string {
+		const key = this._getKey(viewType, additionalKey);
+
+		const existing = this._state[key];
+		if (existing && typeof existing === 'string') {
+			return existing;
+		}
+
+		const newOrigin = generateUuid();
+		this._state[key] = newOrigin;
+		this._memento.saveMemento();
+		return newOrigin;
+	}
+
+	private _getKey(viewType: string, additionalKey: string | undefined): string {
+		return JSON.stringify({ viewType, key: additionalKey });
+	}
+}
+
+/**
+ * Stores the unique origins for a webview.
+ *
+ * These are randomly generated, but keyed on extension and webview viewType.
+ */
+export class ExtensionKeyedWebviewOriginStore {
+
+	private readonly _store: WebviewOriginStore;
+
+	constructor(
+		rootStorageKey: string,
+		@IStorageService storageService: IStorageService,
+	) {
+		this._store = new WebviewOriginStore(rootStorageKey, storageService);
+	}
+
+	public getOrigin(viewType: string, extId: ExtensionIdentifier): string {
+		return this._store.getOrigin(viewType, extId.value);
+	}
 }

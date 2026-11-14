@@ -10,55 +10,55 @@ export interface ITask<T> {
 export class Delayer<T> {
 
 	public defaultDelay: number;
-	private timeout: any; // Timer
-	private completionPromise: Promise<T | null> | null;
-	private onSuccess: ((value: T | PromiseLike<T> | undefined) => void) | null;
-	private task: ITask<T> | null;
+	#timeout: ReturnType<typeof setTimeout> | null;
+	#cancelTimeout: Promise<T | null> | null;
+	#onSuccess: ((value: T | PromiseLike<T> | undefined) => void) | null;
+	#task: ITask<T> | null;
 
 	constructor(defaultDelay: number) {
 		this.defaultDelay = defaultDelay;
-		this.timeout = null;
-		this.completionPromise = null;
-		this.onSuccess = null;
-		this.task = null;
+		this.#timeout = null;
+		this.#cancelTimeout = null;
+		this.#onSuccess = null;
+		this.#task = null;
 	}
 
 	dispose() {
-		this.cancelTimeout();
+		this.#doCancelTimeout();
 	}
 
 	public trigger(task: ITask<T>, delay: number = this.defaultDelay): Promise<T | null> {
-		this.task = task;
+		this.#task = task;
 		if (delay >= 0) {
-			this.cancelTimeout();
+			this.#doCancelTimeout();
 		}
 
-		if (!this.completionPromise) {
-			this.completionPromise = new Promise<T | undefined>((resolve) => {
-				this.onSuccess = resolve;
+		if (!this.#cancelTimeout) {
+			this.#cancelTimeout = new Promise<T | undefined>((resolve) => {
+				this.#onSuccess = resolve;
 			}).then(() => {
-				this.completionPromise = null;
-				this.onSuccess = null;
-				const result = this.task && this.task();
-				this.task = null;
+				this.#cancelTimeout = null;
+				this.#onSuccess = null;
+				const result = this.#task?.() ?? null;
+				this.#task = null;
 				return result;
 			});
 		}
 
-		if (delay >= 0 || this.timeout === null) {
-			this.timeout = setTimeout(() => {
-				this.timeout = null;
-				this.onSuccess?.(undefined);
+		if (delay >= 0 || this.#timeout === null) {
+			this.#timeout = setTimeout(() => {
+				this.#timeout = null;
+				this.#onSuccess?.(undefined);
 			}, delay >= 0 ? delay : this.defaultDelay);
 		}
 
-		return this.completionPromise;
+		return this.#cancelTimeout;
 	}
 
-	private cancelTimeout(): void {
-		if (this.timeout !== null) {
-			clearTimeout(this.timeout);
-			this.timeout = null;
+	#doCancelTimeout(): void {
+		if (this.#timeout !== null) {
+			clearTimeout(this.#timeout);
+			this.#timeout = null;
 		}
 	}
 }

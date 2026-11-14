@@ -3,64 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { Event } from 'vs/base/common/event';
-import { IProcessEnvironment } from 'vs/base/common/platform';
-import { ThemeIcon } from 'vs/platform/theme/common/themeService';
-import { VariableResolver } from 'vs/workbench/contrib/terminal/common/terminalEnvironment';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { Event } from '../../../../base/common/event.js';
+import { OperatingSystem } from '../../../../base/common/platform.js';
+import { EnvironmentVariableScope, IEnvironmentVariableCollection, IMergedEnvironmentVariableCollection } from '../../../../platform/terminal/common/environmentVariable.js';
+import { ITerminalStatus } from './terminal.js';
 
 export const IEnvironmentVariableService = createDecorator<IEnvironmentVariableService>('environmentVariableService');
-
-export enum EnvironmentVariableMutatorType {
-	Replace = 1,
-	Append = 2,
-	Prepend = 3
-}
-
-export interface IEnvironmentVariableMutator {
-	readonly value: string;
-	readonly type: EnvironmentVariableMutatorType;
-}
-
-export interface IExtensionOwnedEnvironmentVariableMutator extends IEnvironmentVariableMutator {
-	readonly extensionIdentifier: string;
-}
-
-export interface IEnvironmentVariableCollection {
-	readonly map: ReadonlyMap<string, IEnvironmentVariableMutator>;
-}
-
-export interface IEnvironmentVariableCollectionWithPersistence extends IEnvironmentVariableCollection {
-	readonly persistent: boolean;
-}
-
-export interface IMergedEnvironmentVariableCollectionDiff {
-	added: ReadonlyMap<string, IExtensionOwnedEnvironmentVariableMutator[]>;
-	changed: ReadonlyMap<string, IExtensionOwnedEnvironmentVariableMutator[]>;
-	removed: ReadonlyMap<string, IExtensionOwnedEnvironmentVariableMutator[]>;
-}
-
-/**
- * Represents an environment variable collection that results from merging several collections
- * together.
- */
-export interface IMergedEnvironmentVariableCollection {
-	readonly collections: ReadonlyMap<string, IEnvironmentVariableCollection>;
-	readonly map: ReadonlyMap<string, IExtensionOwnedEnvironmentVariableMutator[]>;
-
-	/**
-	 * Applies this collection to a process environment.
-	 * @param variableResolver An optional function to use to resolve variables within the
-	 * environment values.
-	 */
-	applyToProcessEnvironment(env: IProcessEnvironment, variableResolver?: VariableResolver): Promise<void>;
-
-	/**
-	 * Generates a diff of this connection against another. Returns undefined if the collections are
-	 * the same.
-	 */
-	diff(other: IMergedEnvironmentVariableCollection): IMergedEnvironmentVariableCollectionDiff | undefined;
-}
 
 /**
  * Tracks and persists environment variable collections as defined by extensions.
@@ -81,10 +30,16 @@ export interface IEnvironmentVariableService {
 	readonly mergedCollection: IMergedEnvironmentVariableCollection;
 
 	/**
+	 * Gets a collection suitable for a terminal running on the provided authority. PATH
+	 * contributions are restricted to the extension host that produced them.
+	 */
+	getMergedCollection(remoteAuthority: string | null | undefined, os: OperatingSystem): IMergedEnvironmentVariableCollection;
+
+	/**
 	 * An event that is fired when an extension's environment variable collection changes, the event
 	 * provides the new merged collection.
 	 */
-	onDidChangeCollections: Event<IMergedEnvironmentVariableCollection>;
+	readonly onDidChangeCollections: Event<IMergedEnvironmentVariableCollection>;
 
 	/**
 	 * Sets an extension's environment variable collection.
@@ -97,20 +52,16 @@ export interface IEnvironmentVariableService {
 	delete(extensionIdentifier: string): void;
 }
 
-/** [variable, mutator] */
-export type ISerializableEnvironmentVariableCollection = [string, IEnvironmentVariableMutator][];
-
-/** [extension, collection] */
-export type ISerializableEnvironmentVariableCollections = [string, ISerializableEnvironmentVariableCollection][];
+export interface IEnvironmentVariableCollectionWithPersistence extends IEnvironmentVariableCollection {
+	readonly persistent: boolean;
+	/**
+	 * The extension host that produced this collection. An absent value is a legacy,
+	 * unknown origin and must not be treated as local.
+	 */
+	readonly remoteAuthority?: string | null;
+}
 
 export interface IEnvironmentVariableInfo {
 	readonly requiresAction: boolean;
-	getInfo(): string;
-	getIcon(): ThemeIcon;
-	getActions?(): {
-		label: string;
-		commandId: string;
-		iconClass?: string;
-		run(target: any): void;
-	}[];
+	getStatus(scope: EnvironmentVariableScope | undefined): ITerminalStatus;
 }

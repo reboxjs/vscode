@@ -3,43 +3,82 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from 'vs/nls';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { IConfigurationRegistry, Extensions as ConfigurationExtensions, IConfigurationNode } from 'vs/platform/configuration/common/configurationRegistry';
-import { workbenchConfigurationNodeBase } from 'vs/workbench/common/configuration';
-import { IEditorResolverService, RegisteredEditorInfo, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
-import { IJSONSchemaMap } from 'vs/base/common/jsonSchema';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { coalesce } from 'vs/base/common/arrays';
-import { Event } from 'vs/base/common/event';
+import { localize } from '../../../../nls.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { IWorkbenchContribution } from '../../../common/contributions.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IConfigurationRegistry, Extensions as ConfigurationExtensions, IConfigurationNode, ConfigurationScope } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { workbenchConfigurationNodeBase } from '../../../common/configuration.js';
+import { diffEditorsAssociationsAgentsWindowDefault, diffEditorsAssociationsSettingId, editorsAssociationsAgentsWindowDefault, editorsAssociationsSettingId, IEditorResolverService, markdownDefaultEditorAgentsWindowSettingId, RegisteredEditorInfo, RegisteredEditorPriority, toRegisteredEditorPriorityInfo } from '../../../services/editor/common/editorResolverService.js';
+import { IJSONSchemaMap } from '../../../../base/common/jsonSchema.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { coalesce } from '../../../../base/common/arrays.js';
+import { Event } from '../../../../base/common/event.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { ByteSize, getLargeFileConfirmationLimit } from '../../../../platform/files/common/files.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 
 export class DynamicEditorConfigurations extends Disposable implements IWorkbenchContribution {
 
-	private static readonly AUTO_LOCK_DEFAULT_ENABLED = new Set<string>(['terminalEditor']);
+	static readonly ID = 'workbench.contrib.dynamicEditorConfigurations';
+
+	private static readonly AUTO_LOCK_DEFAULT_ENABLED = new Set<string>([
+		'terminalEditor',
+		'mainThreadWebview-simpleBrowser.view',
+		'mainThreadWebview-browserPreview',
+		'workbench.editor.processExplorer'
+	]);
 
 	private static readonly AUTO_LOCK_EXTRA_EDITORS: RegisteredEditorInfo[] = [
 
-		// Any webview editor is not a registered editor but we
-		// still want to support auto-locking for them, so we
-		// manually add them here...
+		// List some editor input identifiers that are not
+		// registered yet via the editor resolver infrastructure
+
+		{
+			id: 'workbench.input.interactive',
+			label: localize('interactiveWindow', 'Interactive Window'),
+			priority: toRegisteredEditorPriorityInfo(RegisteredEditorPriority.builtin)
+		},
 		{
 			id: 'mainThreadWebview-markdown.preview',
 			label: localize('markdownPreview', "Markdown Preview"),
-			priority: RegisteredEditorPriority.builtin
+			priority: toRegisteredEditorPriorityInfo(RegisteredEditorPriority.builtin)
+		},
+		{
+			id: 'mainThreadWebview-simpleBrowser.view',
+			label: localize('simpleBrowser', "Simple Browser"),
+			priority: toRegisteredEditorPriorityInfo(RegisteredEditorPriority.builtin)
+		},
+		{
+			id: 'mainThreadWebview-browserPreview',
+			label: localize('livePreview', "Live Preview"),
+			priority: toRegisteredEditorPriorityInfo(RegisteredEditorPriority.builtin)
 		}
 	];
+
+	private static readonly AUTO_LOCK_REMOVE_EDITORS = new Set<string>([
+
+		// List some editor types that the above `AUTO_LOCK_EXTRA_EDITORS`
+		// already covers to avoid duplicates.
+
+		'vscode-interactive-input',
+		'interactive',
+		'vscode.markdown.preview.editor'
+	]);
 
 	private readonly configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
 
 	private autoLockConfigurationNode: IConfigurationNode | undefined;
 	private defaultBinaryEditorConfigurationNode: IConfigurationNode | undefined;
 	private editorAssociationsConfigurationNode: IConfigurationNode | undefined;
+	private diffEditorAssociationsConfigurationNode: IConfigurationNode | undefined;
+	private editorLargeFileConfirmationConfigurationNode: IConfigurationNode | undefined;
 
 	constructor(
 		@IEditorResolverService private readonly editorResolverService: IEditorResolverService,
 		@IExtensionService extensionService: IExtensionService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
 		super();
 
@@ -58,12 +97,19 @@ export class DynamicEditorConfigurations extends Disposable implements IWorkbenc
 	private registerListeners(): void {
 
 		// Registered editors (debounced to reduce perf overhead)
-		Event.debounce(this.editorResolverService.onDidChangeEditorRegistrations, (_, e) => e)(() => this.updateDynamicEditorConfigurations());
+		this._register(Event.debounce(this.editorResolverService.onDidChangeEditorRegistrations, (_, e) => e)(() => this.updateDynamicEditorConfigurations()));
+
+		// Re-register when the Agents window Markdown default editor setting changes
+		this._register(this.configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(markdownDefaultEditorAgentsWindowSettingId)) {
+				this.updateDynamicEditorConfigurations();
+			}
+		}));
 	}
 
 	private updateDynamicEditorConfigurations(): void {
-		const lockableEditors = [...this.editorResolverService.getEditors(), ...DynamicEditorConfigurations.AUTO_LOCK_EXTRA_EDITORS];
-		const binaryEditorCandidates = this.editorResolverService.getEditors().filter(e => e.priority !== RegisteredEditorPriority.exclusive).map(e => e.id);
+		const lockableEditors = [...this.editorResolverService.getEditors(), ...DynamicEditorConfigurations.AUTO_LOCK_EXTRA_EDITORS].filter(e => !DynamicEditorConfigurations.AUTO_LOCK_REMOVE_EDITORS.has(e.id));
+		const binaryEditorCandidates = this.editorResolverService.getEditors({ excludeExclusiveEditors: true }).map(e => e.id);
 
 		// Build config from registered editors
 		const autoLockGroupConfiguration: IJSONSchemaMap = Object.create(null);
@@ -81,14 +127,14 @@ export class DynamicEditorConfigurations extends Disposable implements IWorkbenc
 			defaultAutoLockGroupConfiguration[editor.id] = DynamicEditorConfigurations.AUTO_LOCK_DEFAULT_ENABLED.has(editor.id);
 		}
 
-		// Register settng for auto locking groups
+		// Register setting for auto locking groups
 		const oldAutoLockConfigurationNode = this.autoLockConfigurationNode;
 		this.autoLockConfigurationNode = {
 			...workbenchConfigurationNodeBase,
 			properties: {
 				'workbench.editor.autoLockGroups': {
 					type: 'object',
-					description: localize('workbench.editor.autoLockGroups', "If an editor matching one of the listed types is opened as the first in an editor group and more than one group is open, the group is automatically locked. Locked groups will only be used for opening editors when explicitly chosen by user gesture (e.g. drag and drop), but not by default. Consequently the active editor in a locked group is less likely to be replaced accidentally with a different editor."),
+					description: localize('workbench.editor.autoLockGroups', "If an editor matching one of the listed types is opened as the first in an editor group and more than one group is open, the group is automatically locked. Locked groups will only be used for opening editors when explicitly chosen by a user gesture (for example drag and drop), but not by default. Consequently, the active editor in a locked group is less likely to be replaced accidentally with a different editor."),
 					properties: autoLockGroupConfiguration,
 					default: defaultAutoLockGroupConfiguration,
 					additionalProperties: false
@@ -106,25 +152,65 @@ export class DynamicEditorConfigurations extends Disposable implements IWorkbenc
 					default: '',
 					// This allows for intellisense autocompletion
 					enum: [...binaryEditorCandidates, ''],
-					description: localize('workbench.editor.defaultBinaryEditor', "The default editor for files detected as binary. If undefined the user will be presented with a picker."),
+					description: localize('workbench.editor.defaultBinaryEditor', "The default editor for files detected as binary. If undefined, the user will be presented with a picker."),
 				}
 			}
 		};
 
 		// Registers setting for editorAssociations
 		const oldEditorAssociationsConfigurationNode = this.editorAssociationsConfigurationNode;
+		const markdownDefaultEditorEnabled = this.configurationService.getValue<boolean>(markdownDefaultEditorAgentsWindowSettingId) === true;
 		this.editorAssociationsConfigurationNode = {
 			...workbenchConfigurationNodeBase,
 			properties: {
-				'workbench.editorAssociations': {
+				[editorsAssociationsSettingId]: {
 					type: 'object',
-					markdownDescription: localize('editor.editorAssociations', "Configure glob patterns to editors (e.g. `\"*.hex\": \"hexEditor.hexEdit\"`). These have precedence over the default behavior."),
+					markdownDescription: localize('editor.editorAssociations', "Configure [glob patterns](https://aka.ms/vscode-glob-patterns) to editors (for example `\"*.hex\": \"hexEditor.hexedit\"`). These have precedence over the default behavior."),
 					patternProperties: {
 						'.*': {
 							type: 'string',
 							enum: binaryEditorCandidates,
 						}
+					},
+					agentsWindow: {
+						default: editorsAssociationsAgentsWindowDefault({ markdownDefaultEditor: markdownDefaultEditorEnabled })
 					}
+				}
+			}
+		};
+
+		// Registers setting for diffEditorAssociations
+		const oldDiffEditorAssociationsConfigurationNode = this.diffEditorAssociationsConfigurationNode;
+		this.diffEditorAssociationsConfigurationNode = {
+			...workbenchConfigurationNodeBase,
+			properties: {
+				[diffEditorsAssociationsSettingId]: {
+					type: 'object',
+					markdownDescription: localize('editor.diffEditorAssociations', "Configure [glob patterns](https://aka.ms/vscode-glob-patterns) to editors for diff views (for example `\"*.md\": \"vscode.markdown.preview.editor\"`). These override `workbench.editorAssociations` for diffs."),
+					patternProperties: {
+						'.*': {
+							type: 'string',
+							enum: binaryEditorCandidates,
+						}
+					},
+					agentsWindow: {
+						default: diffEditorsAssociationsAgentsWindowDefault({ markdownDefaultEditor: markdownDefaultEditorEnabled })
+					}
+				}
+			}
+		};
+
+		// Registers setting for large file confirmation based on environment
+		const oldEditorLargeFileConfirmationConfigurationNode = this.editorLargeFileConfirmationConfigurationNode;
+		this.editorLargeFileConfirmationConfigurationNode = {
+			...workbenchConfigurationNodeBase,
+			properties: {
+				'workbench.editorLargeFileConfirmation': {
+					type: 'number',
+					default: getLargeFileConfirmationLimit(this.environmentService.remoteAuthority) / ByteSize.MB,
+					minimum: 1,
+					scope: ConfigurationScope.RESOURCE,
+					markdownDescription: localize('editorLargeFileSizeConfirmation', "Controls the minimum size of a file in MB before asking for confirmation when opening in the editor. Note that this setting may not apply to all editor types and environments."),
 				}
 			}
 		};
@@ -133,12 +219,16 @@ export class DynamicEditorConfigurations extends Disposable implements IWorkbenc
 			add: [
 				this.autoLockConfigurationNode,
 				this.defaultBinaryEditorConfigurationNode,
-				this.editorAssociationsConfigurationNode
+				this.editorAssociationsConfigurationNode,
+				this.diffEditorAssociationsConfigurationNode,
+				this.editorLargeFileConfirmationConfigurationNode
 			],
 			remove: coalesce([
 				oldAutoLockConfigurationNode,
 				oldDefaultBinaryEditorConfigurationNode,
-				oldEditorAssociationsConfigurationNode
+				oldEditorAssociationsConfigurationNode,
+				oldDiffEditorAssociationsConfigurationNode,
+				oldEditorLargeFileConfirmationConfigurationNode
 			])
 		});
 	}

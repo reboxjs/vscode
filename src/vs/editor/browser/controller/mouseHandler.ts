@@ -3,28 +3,33 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as dom from 'vs/base/browser/dom';
-import { StandardWheelEvent, IMouseWheelEvent } from 'vs/base/browser/mouseEvent';
-import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import * as platform from 'vs/base/common/platform';
-import { HitTestContext, MouseTarget, MouseTargetFactory, PointerHandlerLastRenderData } from 'vs/editor/browser/controller/mouseTarget';
-import { IMouseTarget, IMouseTargetOutsideEditor, IMouseTargetViewZoneData, MouseTargetType } from 'vs/editor/browser/editorBrowser';
-import { ClientCoordinates, EditorMouseEvent, EditorMouseEventFactory, GlobalEditorPointerMoveMonitor, createEditorPagePosition, createCoordinatesRelativeToEditor, PageCoordinates } from 'vs/editor/browser/editorDom';
-import { ViewController } from 'vs/editor/browser/view/viewController';
-import { EditorZoom } from 'vs/editor/common/config/editorZoom';
-import { Position } from 'vs/editor/common/core/position';
-import { Selection } from 'vs/editor/common/core/selection';
-import { HorizontalPosition } from 'vs/editor/browser/view/renderingContext';
-import { ViewContext } from 'vs/editor/common/viewModel/viewContext';
-import * as viewEvents from 'vs/editor/common/viewEvents';
-import { ViewEventHandler } from 'vs/editor/common/viewEventHandler';
-import { EditorOption } from 'vs/editor/common/config/editorOptions';
-import { NavigationCommandRevealType } from 'vs/editor/browser/coreCommands';
+import * as dom from '../../../base/browser/dom.js';
+import { StandardWheelEvent, IMouseWheelEvent } from '../../../base/browser/mouseEvent.js';
+import { Disposable, IDisposable } from '../../../base/common/lifecycle.js';
+import * as platform from '../../../base/common/platform.js';
+import { HitTestContext, MouseTarget, MouseTargetFactory, PointerHandlerLastRenderData } from './mouseTarget.js';
+import { IMouseTarget, IMouseTargetViewZoneData, MouseTargetType } from '../editorBrowser.js';
+import { ClientCoordinates, EditorMouseEvent, EditorMouseEventFactory, GlobalEditorPointerMoveMonitor, createEditorPagePosition, createCoordinatesRelativeToEditor } from '../editorDom.js';
+import { ViewController } from '../view/viewController.js';
+import { EditorZoom } from '../../common/config/editorZoom.js';
+import { Position } from '../../common/core/position.js';
+import { Selection } from '../../common/core/selection.js';
+import { HorizontalPosition } from '../view/renderingContext.js';
+import { ViewContext } from '../../common/viewModel/viewContext.js';
+import * as viewEvents from '../../common/viewEvents.js';
+import { ViewEventHandler } from '../../common/viewEventHandler.js';
+import { EditorOption } from '../../common/config/editorOptions.js';
+import { NavigationCommandRevealType } from '../coreCommands.js';
+import { MouseWheelClassifier } from '../../../base/browser/ui/scrollbar/scrollableElement.js';
+import type { ViewLinesGpu } from '../viewParts/viewLinesGpu/viewLinesGpu.js';
+import { TopBottomDragScrolling, LeftRightDragScrolling } from './dragScrolling.js';
+import { TextDirection } from '../../common/model.js';
 
 export interface IPointerHandlerHelper {
 	viewDomNode: HTMLElement;
 	linesContentDomNode: HTMLElement;
 	viewLinesDomNode: HTMLElement;
+	viewLinesGpu: ViewLinesGpu | undefined;
 
 	focusTextArea(): void;
 	dispatchTextAreaEvent(event: CustomEvent): void;
@@ -97,7 +102,7 @@ export class MouseHandler extends ViewEventHandler {
 			// remove this listener
 
 			if (!this._mouseLeaveMonitor) {
-				this._mouseLeaveMonitor = dom.addDisposableListener(document, 'mousemove', (e) => {
+				this._mouseLeaveMonitor = dom.addDisposableListener(this.viewHelper.viewDomNode.ownerDocument, 'mousemove', (e) => {
 					if (!this.viewHelper.viewDomNode.contains(e.target as Node | null)) {
 						// went outside the editor!
 						this._onMouseLeave(new EditorMouseEvent(e, false, this.viewHelper.viewDomNode));
@@ -127,6 +132,19 @@ export class MouseHandler extends ViewEventHandler {
 			this._mouseDownOperation.onPointerUp();
 		}));
 		this._register(mouseEvents.onMouseDown(this.viewHelper.viewDomNode, (e) => this._onMouseDown(e, capturePointerId)));
+		this._setupMouseWheelZoomListener();
+
+		this._context.addEventHandler(this);
+	}
+
+	private _setupMouseWheelZoomListener(): void {
+
+		const classifier = MouseWheelClassifier.INSTANCE;
+
+		let prevMouseWheelTime = 0;
+		let gestureStartZoomLevel = EditorZoom.getZoomLevel();
+		let gestureHasZoomModifiers = false;
+		let gestureAccumulatedDelta = 0;
 
 		const onMouseWheel = (browserEvent: IMouseWheelEvent) => {
 			this.viewController.emitMouseWheel(browserEvent);
@@ -134,25 +152,50 @@ export class MouseHandler extends ViewEventHandler {
 			if (!this._context.configuration.options.get(EditorOption.mouseWheelZoom)) {
 				return;
 			}
+
 			const e = new StandardWheelEvent(browserEvent);
-			const doMouseWheelZoom = (
+			classifier.acceptStandardWheelEvent(e);
+
+			if (classifier.isPhysicalMouseWheel()) {
+				if (hasMouseWheelZoomModifiers(browserEvent)) {
+					const zoomLevel: number = EditorZoom.getZoomLevel();
+					const delta = e.deltaY > 0 ? 1 : -1;
+					EditorZoom.setZoomLevel(zoomLevel + delta);
+					e.preventDefault();
+					e.stopPropagation();
+				}
+			} else {
+				// we consider mousewheel events that occur within 50ms of each other to be part of the same gesture
+				// we don't want to consider mouse wheel events where ctrl/cmd is pressed during the inertia phase
+				// we also want to accumulate deltaY values from the same gesture and use that to set the zoom level
+				if (Date.now() - prevMouseWheelTime > 50) {
+					// reset if more than 50ms have passed
+					gestureStartZoomLevel = EditorZoom.getZoomLevel();
+					gestureHasZoomModifiers = hasMouseWheelZoomModifiers(browserEvent);
+					gestureAccumulatedDelta = 0;
+				}
+
+				prevMouseWheelTime = Date.now();
+				gestureAccumulatedDelta += e.deltaY;
+
+				if (gestureHasZoomModifiers) {
+					EditorZoom.setZoomLevel(gestureStartZoomLevel + gestureAccumulatedDelta / 5);
+					e.preventDefault();
+					e.stopPropagation();
+				}
+			}
+		};
+		this._register(dom.addDisposableListener(this.viewHelper.viewDomNode, dom.EventType.MOUSE_WHEEL, onMouseWheel, { capture: true, passive: false }));
+
+		function hasMouseWheelZoomModifiers(browserEvent: IMouseWheelEvent): boolean {
+			return (
 				platform.isMacintosh
 					// on macOS we support cmd + two fingers scroll (`metaKey` set)
 					// and also the two fingers pinch gesture (`ctrKey` set)
 					? ((browserEvent.metaKey || browserEvent.ctrlKey) && !browserEvent.shiftKey && !browserEvent.altKey)
 					: (browserEvent.ctrlKey && !browserEvent.metaKey && !browserEvent.shiftKey && !browserEvent.altKey)
 			);
-			if (doMouseWheelZoom) {
-				const zoomLevel: number = EditorZoom.getZoomLevel();
-				const delta = e.deltaY > 0 ? 1 : -1;
-				EditorZoom.setZoomLevel(zoomLevel + delta);
-				e.preventDefault();
-				e.stopPropagation();
-			}
-		};
-		this._register(dom.addDisposableListener(this.viewHelper.viewDomNode, dom.EventType.MOUSE_WHEEL, onMouseWheel, { capture: true, passive: false }));
-
-		this._context.addEventHandler(this);
+		}
 	}
 
 	public override dispose(): void {
@@ -187,7 +230,7 @@ export class MouseHandler extends ViewEventHandler {
 
 	public getTargetAtClientPoint(clientX: number, clientY: number): IMouseTarget | null {
 		const clientPos = new ClientCoordinates(clientX, clientY);
-		const pos = clientPos.toPageCoordinates();
+		const pos = clientPos.toPageCoordinates(dom.getWindow(this.viewHelper.viewDomNode));
 		const editorPos = createEditorPagePosition(this.viewHelper.viewDomNode);
 
 		if (pos.y < editorPos.y || pos.y > editorPos.y + editorPos.height || pos.x < editorPos.x || pos.x > editorPos.x + editorPos.width) {
@@ -199,13 +242,14 @@ export class MouseHandler extends ViewEventHandler {
 	}
 
 	protected _createMouseTarget(e: EditorMouseEvent, testEventTarget: boolean): IMouseTarget {
-		let target = e.target;
+		let target: HTMLElement | null = e.target;
 		if (!this.viewHelper.viewDomNode.contains(target)) {
 			const shadowRoot = dom.getShadowRoot(this.viewHelper.viewDomNode);
 			if (shadowRoot) {
-				target = (<any>shadowRoot).elementsFromPoint(e.posx, e.posy).find(
+				const potentialTarget = shadowRoot.elementsFromPoint(e.posx, e.posy).find(
 					(el: Element) => this.viewHelper.viewDomNode.contains(el)
-				);
+				) ?? null;
+				target = potentialTarget as HTMLElement;
 			}
 		}
 		return this.mouseTargetFactory.createMouseTarget(this.viewHelper.getLastRenderData(), e.editorPos, e.pos, e.relativePos, testEventTarget ? target : null);
@@ -222,7 +266,7 @@ export class MouseHandler extends ViewEventHandler {
 		});
 	}
 
-	public _onMouseMove(e: EditorMouseEvent): void {
+	protected _onMouseMove(e: EditorMouseEvent): void {
 		const targetIsWidget = this.mouseTargetFactory.mouseTargetIsWidget(e);
 		if (!targetIsWidget) {
 			e.preventDefault();
@@ -244,7 +288,7 @@ export class MouseHandler extends ViewEventHandler {
 		});
 	}
 
-	public _onMouseLeave(e: EditorMouseEvent): void {
+	protected _onMouseLeave(e: EditorMouseEvent): void {
 		if (this._mouseLeaveMonitor) {
 			this._mouseLeaveMonitor.dispose();
 			this._mouseLeaveMonitor = null;
@@ -256,14 +300,14 @@ export class MouseHandler extends ViewEventHandler {
 		});
 	}
 
-	public _onMouseUp(e: EditorMouseEvent): void {
+	protected _onMouseUp(e: EditorMouseEvent): void {
 		this.viewController.emitMouseUp({
 			event: e,
 			target: this._createMouseTarget(e, true)
 		});
 	}
 
-	public _onMouseDown(e: EditorMouseEvent, pointerId: number): void {
+	protected _onMouseDown(e: EditorMouseEvent, pointerId: number): void {
 		const t = this._createMouseTarget(e, true);
 
 		const targetIsContent = (t.type === MouseTargetType.CONTENT_TEXT || t.type === MouseTargetType.CONTENT_EMPTY);
@@ -297,7 +341,7 @@ export class MouseHandler extends ViewEventHandler {
 				this._mouseDownOperation.start(t.type, e, pointerId);
 				e.preventDefault();
 			}
-		} else if (targetIsWidget && this.viewHelper.shouldSuppressMouseDownOnWidget(<string>t.detail)) {
+		} else if (targetIsWidget && this.viewHelper.shouldSuppressMouseDownOnWidget(t.detail)) {
 			focus();
 			e.preventDefault();
 		}
@@ -308,7 +352,7 @@ export class MouseHandler extends ViewEventHandler {
 		});
 	}
 
-	public _onMouseWheel(e: IMouseWheelEvent): void {
+	protected _onMouseWheel(e: IMouseWheelEvent): void {
 		this.viewController.emitMouseWheel(e);
 	}
 }
@@ -320,6 +364,7 @@ class MouseDownOperation extends Disposable {
 
 	private readonly _mouseMoveMonitor: GlobalEditorPointerMoveMonitor;
 	private readonly _topBottomDragScrolling: TopBottomDragScrolling;
+	private readonly _leftRightDragScrolling: LeftRightDragScrolling;
 	private readonly _mouseState: MouseDownState;
 
 	private _currentSelection: Selection;
@@ -345,15 +390,17 @@ class MouseDownOperation extends Disposable {
 			this._mouseTargetFactory,
 			(position, inSelectionMode, revealType) => this._dispatchMouse(position, inSelectionMode, revealType)
 		));
+		this._leftRightDragScrolling = this._register(new LeftRightDragScrolling(
+			this._context,
+			this._viewHelper,
+			this._mouseTargetFactory,
+			(position, inSelectionMode, revealType) => this._dispatchMouse(position, inSelectionMode, revealType)
+		));
 		this._mouseState = new MouseDownState();
 
 		this._currentSelection = new Selection(1, 1, 1, 1);
 		this._isActive = false;
 		this._lastMouseEvent = null;
-	}
-
-	public override dispose(): void {
-		super.dispose();
 	}
 
 	public isActive(): boolean {
@@ -376,10 +423,17 @@ class MouseDownOperation extends Disposable {
 				target: position
 			});
 		} else {
-			if (position.type === MouseTargetType.OUTSIDE_EDITOR && (position.outsidePosition === 'above' || position.outsidePosition === 'below')) {
-				this._topBottomDragScrolling.start(position, e);
+			if (position.type === MouseTargetType.OUTSIDE_EDITOR) {
+				if (position.outsidePosition === 'above' || position.outsidePosition === 'below') {
+					this._topBottomDragScrolling.start(position, e);
+					this._leftRightDragScrolling.stop();
+				} else {
+					this._leftRightDragScrolling.start(position, e);
+					this._topBottomDragScrolling.stop();
+				}
 			} else {
 				this._topBottomDragScrolling.stop();
+				this._leftRightDragScrolling.stop();
 				this._dispatchMouse(position, true, NavigationCommandRevealType.Minimal);
 			}
 		}
@@ -425,7 +479,7 @@ class MouseDownOperation extends Disposable {
 				(browserEvent?: MouseEvent | KeyboardEvent) => {
 					const position = this._findMousePosition(this._lastMouseEvent!, false);
 
-					if (browserEvent && browserEvent instanceof KeyboardEvent) {
+					if (dom.isKeyboardEvent(browserEvent)) {
 						// cancel
 						this._viewController.emitMouseDropCanceled();
 					} else {
@@ -460,6 +514,7 @@ class MouseDownOperation extends Disposable {
 	private _stop(): void {
 		this._isActive = false;
 		this._topBottomDragScrolling.stop();
+		this._leftRightDragScrolling.stop();
 	}
 
 	public onHeightChanged(): void {
@@ -513,14 +568,25 @@ class MouseDownOperation extends Disposable {
 
 		const possibleLineNumber = viewLayout.getLineNumberAtVerticalOffset(viewLayout.getCurrentScrollTop() + e.relativePos.y);
 
-		if (e.posx < editorContent.x) {
-			const outsideDistance = editorContent.x - e.posx;
-			return MouseTarget.createOutsideEditor(mouseColumn, new Position(possibleLineNumber, 1), 'left', outsideDistance);
+		const layoutInfo = this._context.configuration.options.get(EditorOption.layoutInfo);
+
+		const xLeftBoundary = layoutInfo.contentLeft;
+		if (e.relativePos.x <= xLeftBoundary) {
+			const outsideDistance = xLeftBoundary - e.relativePos.x;
+			const isRtl = model.getTextDirection(possibleLineNumber) === TextDirection.RTL;
+			return MouseTarget.createOutsideEditor(mouseColumn, new Position(possibleLineNumber, isRtl ? model.getLineMaxColumn(possibleLineNumber) : 1), 'left', outsideDistance);
 		}
 
-		if (e.posx > editorContent.x + editorContent.width) {
-			const outsideDistance = e.posx - editorContent.x - editorContent.width;
-			return MouseTarget.createOutsideEditor(mouseColumn, new Position(possibleLineNumber, model.getLineMaxColumn(possibleLineNumber)), 'right', outsideDistance);
+		const contentRight = (
+			layoutInfo.minimap.minimapLeft === 0
+				? layoutInfo.width - layoutInfo.verticalScrollbarWidth // Happens when minimap is hidden
+				: layoutInfo.minimap.minimapLeft
+		);
+		const xRightBoundary = contentRight;
+		if (e.relativePos.x >= xRightBoundary) {
+			const outsideDistance = e.relativePos.x - xRightBoundary;
+			const isRtl = model.getTextDirection(possibleLineNumber) === TextDirection.RTL;
+			return MouseTarget.createOutsideEditor(mouseColumn, new Position(possibleLineNumber, isRtl ? 1 : model.getLineMaxColumn(possibleLineNumber)), 'right', outsideDistance);
 		}
 
 		return null;
@@ -586,134 +652,6 @@ class MouseDownOperation extends Disposable {
 
 			onInjectedText: position.type === MouseTargetType.CONTENT_TEXT && position.detail.injectedText !== null
 		});
-	}
-}
-
-class TopBottomDragScrolling extends Disposable {
-
-	private _operation: TopBottomDragScrollingOperation | null;
-
-	constructor(
-		private readonly _context: ViewContext,
-		private readonly _viewHelper: IPointerHandlerHelper,
-		private readonly _mouseTargetFactory: MouseTargetFactory,
-		private readonly _dispatchMouse: (position: IMouseTarget, inSelectionMode: boolean, revealType: NavigationCommandRevealType) => void,
-	) {
-		super();
-		this._operation = null;
-	}
-
-	public override dispose(): void {
-		super.dispose();
-		this.stop();
-	}
-
-	public start(position: IMouseTargetOutsideEditor, mouseEvent: EditorMouseEvent): void {
-		if (this._operation) {
-			this._operation.setPosition(position, mouseEvent);
-		} else {
-			this._operation = new TopBottomDragScrollingOperation(this._context, this._viewHelper, this._mouseTargetFactory, this._dispatchMouse, position, mouseEvent);
-		}
-	}
-
-	public stop(): void {
-		if (this._operation) {
-			this._operation.dispose();
-			this._operation = null;
-		}
-	}
-}
-
-class TopBottomDragScrollingOperation extends Disposable {
-
-	private _position: IMouseTargetOutsideEditor;
-	private _mouseEvent: EditorMouseEvent;
-	private _lastTime: number;
-	private _animationFrameDisposable: IDisposable;
-
-	constructor(
-		private readonly _context: ViewContext,
-		private readonly _viewHelper: IPointerHandlerHelper,
-		private readonly _mouseTargetFactory: MouseTargetFactory,
-		private readonly _dispatchMouse: (position: IMouseTarget, inSelectionMode: boolean, revealType: NavigationCommandRevealType) => void,
-		position: IMouseTargetOutsideEditor,
-		mouseEvent: EditorMouseEvent
-	) {
-		super();
-		this._position = position;
-		this._mouseEvent = mouseEvent;
-		this._lastTime = Date.now();
-		this._animationFrameDisposable = dom.scheduleAtNextAnimationFrame(() => this._execute());
-	}
-
-	public override dispose(): void {
-		this._animationFrameDisposable.dispose();
-	}
-
-	public setPosition(position: IMouseTargetOutsideEditor, mouseEvent: EditorMouseEvent): void {
-		this._position = position;
-		this._mouseEvent = mouseEvent;
-	}
-
-	/**
-	 * update internal state and return elapsed ms since last time
-	 */
-	private _tick(): number {
-		const now = Date.now();
-		const elapsed = now - this._lastTime;
-		this._lastTime = now;
-		return elapsed;
-	}
-
-	/**
-	 * get the number of lines per second to auto-scroll
-	 */
-	private _getScrollSpeed(): number {
-		const lineHeight = this._context.configuration.options.get(EditorOption.lineHeight);
-		const viewportInLines = this._context.configuration.options.get(EditorOption.layoutInfo).height / lineHeight;
-		const outsideDistanceInLines = this._position.outsideDistance / lineHeight;
-
-		if (outsideDistanceInLines <= 1.5) {
-			return Math.max(30, viewportInLines * (1 + outsideDistanceInLines));
-		}
-		if (outsideDistanceInLines <= 3) {
-			return Math.max(60, viewportInLines * (2 + outsideDistanceInLines));
-		}
-		return Math.max(200, viewportInLines * (7 + outsideDistanceInLines));
-	}
-
-	private _execute(): void {
-		const lineHeight = this._context.configuration.options.get(EditorOption.lineHeight);
-		const scrollSpeedInLines = this._getScrollSpeed();
-		const elapsed = this._tick();
-		const scrollInPixels = scrollSpeedInLines * (elapsed / 1000) * lineHeight;
-		const scrollValue = (this._position.outsidePosition === 'above' ? -scrollInPixels : scrollInPixels);
-
-		this._context.viewModel.viewLayout.deltaScrollNow(0, scrollValue);
-		this._viewHelper.renderNow();
-
-		const viewportData = this._context.viewLayout.getLinesViewportData();
-		const edgeLineNumber = (this._position.outsidePosition === 'above' ? viewportData.startLineNumber : viewportData.endLineNumber);
-
-		// First, try to find a position that matches the horizontal position of the mouse
-		let mouseTarget: IMouseTarget;
-		{
-			const editorPos = createEditorPagePosition(this._viewHelper.viewDomNode);
-			const horizontalScrollbarHeight = this._context.configuration.options.get(EditorOption.layoutInfo).horizontalScrollbarHeight;
-			const pos = new PageCoordinates(this._mouseEvent.pos.x, editorPos.y + editorPos.height - horizontalScrollbarHeight - 0.1);
-			const relativePos = createCoordinatesRelativeToEditor(this._viewHelper.viewDomNode, editorPos, pos);
-			mouseTarget = this._mouseTargetFactory.createMouseTarget(this._viewHelper.getLastRenderData(), editorPos, pos, relativePos, null);
-		}
-		if (!mouseTarget.position || mouseTarget.position.lineNumber !== edgeLineNumber) {
-			if (this._position.outsidePosition === 'above') {
-				mouseTarget = MouseTarget.createOutsideEditor(this._position.mouseColumn, new Position(edgeLineNumber, 1), 'above', this._position.outsideDistance);
-			} else {
-				mouseTarget = MouseTarget.createOutsideEditor(this._position.mouseColumn, new Position(edgeLineNumber, this._context.viewModel.getLineMaxColumn(edgeLineNumber)), 'below', this._position.outsideDistance);
-			}
-		}
-
-		this._dispatchMouse(mouseTarget, true, NavigationCommandRevealType.None);
-		this._animationFrameDisposable = dom.scheduleAtNextAnimationFrame(() => this._execute());
 	}
 }
 

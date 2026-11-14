@@ -3,33 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { reset } from 'vs/base/browser/dom';
-import { renderLabelWithIcons } from 'vs/base/browser/ui/iconLabel/iconLabels';
-import { CompareResult } from 'vs/base/common/arrays';
-import { BugIndicatingError } from 'vs/base/common/errors';
-import { Event } from 'vs/base/common/event';
-import { Disposable, toDisposable } from 'vs/base/common/lifecycle';
-import { autorun, autorunWithStore, derived, IObservable, transaction } from 'vs/base/common/observable';
-import { URI } from 'vs/base/common/uri';
-import { CodeLens, CodeLensProvider, Command } from 'vs/editor/common/languages';
-import { IModelDeltaDecoration, MinimapPosition, OverviewRulerLane } from 'vs/editor/common/model';
-import { ILanguageFeaturesService } from 'vs/editor/common/services/languageFeatures';
-import { localize } from 'vs/nls';
-import { MenuId } from 'vs/platform/actions/common/actions';
-import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { ILabelService } from 'vs/platform/label/common/label';
-import { MergeMarkersController } from 'vs/workbench/contrib/mergeEditor/browser/mergeMarkers/mergeMarkersController';
-import { LineRange } from 'vs/workbench/contrib/mergeEditor/browser/model/lineRange';
-import { ModifiedBaseRangeState } from 'vs/workbench/contrib/mergeEditor/browser/model/modifiedBaseRange';
-import { applyObservableDecorations, join } from 'vs/workbench/contrib/mergeEditor/browser/utils';
-import { handledConflictMinimapOverViewRulerColor, unhandledConflictMinimapOverViewRulerColor } from 'vs/workbench/contrib/mergeEditor/browser/view/colors';
-import { EditorGutter } from 'vs/workbench/contrib/mergeEditor/browser/view/editorGutter';
-import { MergeEditorViewModel } from 'vs/workbench/contrib/mergeEditor/browser/view/viewModel';
-import { ctxIsMergeResultEditor } from 'vs/workbench/contrib/mergeEditor/common/mergeEditor';
-import { CodeEditorView, createSelectionsAutorun, TitleMenu } from './codeEditorView';
+import { reset } from '../../../../../../base/browser/dom.js';
+import { ActionBar } from '../../../../../../base/browser/ui/actionbar/actionbar.js';
+import { renderLabelWithIcons } from '../../../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { CompareResult } from '../../../../../../base/common/arrays.js';
+import { BugIndicatingError } from '../../../../../../base/common/errors.js';
+import { toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { autorun, autorunWithStore, derived, IObservable } from '../../../../../../base/common/observable.js';
+import { IModelDeltaDecoration, MinimapPosition, OverviewRulerLane } from '../../../../../../editor/common/model.js';
+import { localize } from '../../../../../../nls.js';
+import { MenuId } from '../../../../../../platform/actions/common/actions.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
+import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { ILabelService } from '../../../../../../platform/label/common/label.js';
+import { MergeEditorLineRange } from '../../model/lineRange.js';
+import { applyObservableDecorations, join } from '../../utils.js';
+import { handledConflictMinimapOverViewRulerColor, unhandledConflictMinimapOverViewRulerColor } from '../colors.js';
+import { EditorGutter } from '../editorGutter.js';
+import { MergeEditorViewModel } from '../viewModel.js';
+import { ctxIsMergeResultEditor } from '../../../common/mergeEditor.js';
+import { CodeEditorView, createSelectionsAutorun, TitleMenu } from './codeEditorView.js';
 
 export class ResultCodeEditorView extends CodeEditorView {
 	constructor(
@@ -47,30 +41,23 @@ export class ResultCodeEditorView extends CodeEditorView {
 			this._register(toDisposable(() => isMergeResultEditor.reset()));
 		});
 
-		this._register(new MergeMarkersController(this.editor, this.viewModel));
-
-		this._register(
-			autorunWithStore((reader, store) => {
-				if (this.codeLensesVisible.read(reader)) {
-					store.add(instantiationService.createInstance(CodeLensPart, this));
-				}
-			}, 'update code lens part')
-		);
-
 		this.htmlElements.gutterDiv.style.width = '5px';
+		this.htmlElements.root.classList.add(`result`);
 
 		this._register(
 			autorunWithStore((reader, store) => {
+				/** @description update checkboxes */
 				if (this.checkboxesVisible.read(reader)) {
 					store.add(new EditorGutter(this.editor, this.htmlElements.gutterDiv, {
 						getIntersectingGutterItems: (range, reader) => [],
 						createView: (item, target) => { throw new BugIndicatingError(); },
 					}));
 				}
-			}, 'update checkboxes')
+			})
 		);
 
-		this._register(autorun('update labels & text model', reader => {
+		this._register(autorun(reader => {
+			/** @description update labels & text model */
 			const vm = this.viewModel.read(reader);
 			if (!vm) {
 				return;
@@ -81,18 +68,22 @@ export class ResultCodeEditorView extends CodeEditorView {
 		}));
 
 
-		this._register(autorun('update remainingConflicts label', reader => {
-			// this is a bit of a hack, but it's the easiest way to get the label to update
-			// when the view model updates, as the the base class resets the label in the setModel call.
-			this.viewModel.read(reader);
+		const remainingConflictsActionBar = this._register(new ActionBar(this.htmlElements.detail));
 
-			const model = this.model.read(reader);
+		this._register(autorun(reader => {
+			/** @description update remainingConflicts label */
+			const vm = this.viewModel.read(reader);
+			if (!vm) {
+				return;
+			}
+
+			const model = vm.model;
 			if (!model) {
 				return;
 			}
 			const count = model.unhandledConflictsCount.read(reader);
 
-			this.htmlElements.detail.innerText = count === 1
+			const text = count === 1
 				? localize(
 					'mergeEditor.remainingConflicts',
 					'{0} Conflict Remaining',
@@ -104,6 +95,20 @@ export class ResultCodeEditorView extends CodeEditorView {
 					count
 				);
 
+			remainingConflictsActionBar.clear();
+			remainingConflictsActionBar.push({
+				class: undefined,
+				enabled: count > 0,
+				id: 'nextConflict',
+				label: text,
+				run() {
+					vm.model.telemetry.reportConflictCounterClicked();
+					vm.goToNextModifiedBaseRange(m => !model.isHandled(m).read(undefined));
+				},
+				tooltip: count > 0
+					? localize('goToNextConflict', 'Go to next conflict')
+					: localize('allConflictHandled', 'All conflicts handled, the merge can be completed now.'),
+			});
 		}));
 
 
@@ -124,20 +129,21 @@ export class ResultCodeEditorView extends CodeEditorView {
 		);
 	}
 
-	private readonly decorations = derived('result.decorations', reader => {
+	private readonly decorations = derived(this, reader => {
 		const viewModel = this.viewModel.read(reader);
 		if (!viewModel) {
 			return [];
 		}
 		const model = viewModel.model;
+		const textModel = model.resultTextModel;
 		const result = new Array<IModelDeltaDecoration>();
 
 		const baseRangeWithStoreAndTouchingDiffs = join(
 			model.modifiedBaseRanges.read(reader),
 			model.baseResultDiffs.read(reader),
-			(baseRange, diff) => baseRange.baseRange.touches(diff.inputRange)
+			(baseRange, diff) => baseRange.baseRange.intersectsOrTouches(diff.inputRange)
 				? CompareResult.neitherLessOrGreaterThan
-				: LineRange.compareByStart(
+				: MergeEditorLineRange.compareByStart(
 					baseRange.baseRange,
 					diff.inputRange
 				)
@@ -152,12 +158,14 @@ export class ResultCodeEditorView extends CodeEditorView {
 
 			if (modifiedBaseRange) {
 				const blockClassNames = ['merge-editor-block'];
+				let blockPadding: [top: number, right: number, bottom: number, left: number] = [0, 0, 0, 0];
 				const isHandled = model.isHandled(modifiedBaseRange).read(reader);
 				if (isHandled) {
 					blockClassNames.push('handled');
 				}
 				if (modifiedBaseRange === activeModifiedBaseRange) {
 					blockClassNames.push('focused');
+					blockPadding = [0, 2, 0, 2];
 				}
 				if (modifiedBaseRange.isConflicting) {
 					blockClassNames.push('conflicting');
@@ -168,11 +176,14 @@ export class ResultCodeEditorView extends CodeEditorView {
 					continue;
 				}
 
+				const range = model.getLineRangeInResult(modifiedBaseRange.baseRange, reader);
 				result.push({
-					range: model.getLineRangeInResult(modifiedBaseRange.baseRange, reader).toInclusiveRangeOrEmpty(),
+					range: range.toInclusiveRangeOrEmpty(),
 					options: {
 						showIfCollapsed: true,
 						blockClassName: blockClassNames.join(' '),
+						blockPadding,
+						blockIsAfterEnd: range.startLineNumber > textModel.getLineCount(),
 						description: 'Result Diff',
 						minimap: {
 							position: MinimapPosition.Gutter,
@@ -184,9 +195,7 @@ export class ResultCodeEditorView extends CodeEditorView {
 						} : undefined
 					}
 				});
-
 			}
-
 
 			if (!modifiedBaseRange || modifiedBaseRange.isConflicting) {
 				for (const diff of m.rights) {
@@ -218,148 +227,4 @@ export class ResultCodeEditorView extends CodeEditorView {
 		}
 		return result;
 	});
-}
-
-class CodeLensPart extends Disposable {
-	public static commandCounter = 0;
-
-	constructor(
-		resultCodeEditorView: ResultCodeEditorView,
-		@ILanguageFeaturesService languageFeaturesService: ILanguageFeaturesService,
-	) {
-		super();
-
-		const codeLensCommandId = `mergeEditor.codeLensCommandResult${CodeLensPart.commandCounter++}`;
-		this._register(CommandsRegistry.registerCommand(codeLensCommandId, (accessor, arg) => {
-			arg();
-		}));
-
-		function command(title: string, callback: () => Promise<void>): Command {
-			return {
-				title,
-				id: codeLensCommandId,
-				arguments: [callback],
-			};
-		}
-
-		const codeLenses = derived<{ codeLenses: CodeLens[]; uri: URI } | undefined>('codeLenses', reader => {
-			const viewModel = resultCodeEditorView.viewModel.read(reader);
-			if (!viewModel) {
-				return undefined;
-			}
-			const model = viewModel.model;
-			const showNonConflictingChanges = viewModel.showNonConflictingChanges.read(reader);
-
-			return {
-				codeLenses: viewModel.model.modifiedBaseRanges.read(reader).flatMap<CodeLens>(r => {
-					const range = model.getLineRangeInResult(r.baseRange, reader).toRange();
-
-					const handled = model.isHandled(r).read(reader);
-					const state = model.getState(r).read(reader);
-					const result: CodeLens[] = [];
-
-					if (!r.isConflicting && handled && !showNonConflictingChanges) {
-						return [];
-					}
-
-					const stateLabel = ((state: ModifiedBaseRangeState): string => {
-						if (state.conflicting) {
-							return '= Manual Resolution';
-						} else if (state.isEmpty) {
-							return '= Base';
-						} else {
-							const labels = [];
-							if (state.input1) {
-								labels.push(model.input1.title);
-							}
-							if (state.input2) {
-								labels.push(model.input2.title);
-							}
-							return `= ${labels.join(' + ')}`;
-						}
-					})(state);
-
-					result.push({
-						range,
-						command: {
-							title: stateLabel,
-							id: 'notSupported',
-						}
-					});
-
-
-					const stateToggles: CodeLens[] = [];
-					if (state.input1) {
-						result.push({
-							range,
-							command: command(`$(error) Remove ${model.input1.title}`, async () => {
-								transaction((tx) => {
-									model.setState(
-										r,
-										state.withInputValue(1, false),
-										true,
-										tx
-									);
-								});
-							}),
-						});
-					}
-					if (state.input2) {
-						result.push({
-							range,
-							command: command(`$(error) Remove ${model.input2.title}`, async () => {
-								transaction((tx) => {
-									model.setState(
-										r,
-										state.withInputValue(2, false),
-										true,
-										tx
-									);
-								});
-							}),
-						});
-					}
-					if (state.input2First) {
-						stateToggles.reverse();
-					}
-					result.push(...stateToggles);
-
-
-
-					if (state.conflicting) {
-						result.push(
-							{
-								range,
-								command: command(`$(error) Reset to base`, async () => {
-									transaction((tx) => {
-										model.setState(
-											r,
-											ModifiedBaseRangeState.default,
-											true,
-											tx
-										);
-									});
-								})
-							}
-						);
-					}
-					return result;
-				}),
-				uri: model.resultTextModel.uri,
-			};
-		});
-
-		const codeLensProvider: CodeLensProvider = {
-			onDidChange: Event.map(Event.fromObservable(codeLenses), () => codeLensProvider),
-			async provideCodeLenses(model, token) {
-				const result = codeLenses.get();
-				if (!result || result.uri.toString() !== model.uri.toString()) {
-					return { lenses: [], dispose: () => { } };
-				}
-				return { lenses: result.codeLenses, dispose: () => { } };
-			}
-		};
-
-		this._register(languageFeaturesService.codeLensProvider.register({ pattern: '**/*' }, codeLensProvider));
-	}
 }

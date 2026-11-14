@@ -4,15 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import * as nls from 'vscode-nls';
-import { API as GitAPI, Repository } from './typings/git';
-import { getOctokit } from './auth';
+import type { API as GitAPI, Repository } from './typings/git.d.ts';
+import { GitHubService } from './auth.js';
 import { TextEncoder } from 'util';
 import { basename } from 'path';
-import { Octokit } from '@octokit/rest';
-import { isInCodespaces } from './pushErrorHandler';
-
-const localize = nls.loadMessageBundle();
+import type { GitHubClient, GitHubRepository } from '@vscode/internal-github';
+import { isInCodespaces } from './pushErrorHandler.js';
 
 function sanitizeRepositoryName(value: string): string {
 	return value.trim().replace(/[^a-z0-9_.]/ig, '-');
@@ -25,7 +22,7 @@ function getPick<T extends vscode.QuickPickItem>(quickpick: vscode.QuickPick<T>)
 	]);
 }
 
-export async function publishRepository(gitAPI: GitAPI, repository?: Repository): Promise<void> {
+export async function publishRepository(gitAPI: GitAPI, githubService: GitHubService, repository?: Repository): Promise<void> {
 	if (!vscode.workspace.workspaceFolders?.length) {
 		return;
 	}
@@ -41,7 +38,7 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 		folder = vscode.workspace.workspaceFolders[0].uri;
 	} else {
 		const picks = vscode.workspace.workspaceFolders.map(folder => ({ label: folder.name, folder }));
-		const placeHolder = localize('pick folder', "Pick a folder to publish to GitHub");
+		const placeHolder = vscode.l10n.t('Pick a folder to publish to GitHub');
 		const pick = await vscode.window.showQuickPick(picks, { placeHolder });
 
 		if (!pick) {
@@ -60,11 +57,11 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 	quickpick.busy = true;
 
 	let owner: string;
-	let octokit: Octokit;
+	let client: GitHubClient;
 	try {
-		octokit = await getOctokit();
-		const user = await octokit.users.getAuthenticated({});
-		owner = user.data.login;
+		client = await githubService.getClient();
+		const user = await client.users.getAuthenticated();
+		owner = user.login;
 	} catch (e) {
 		// User has cancelled sign in
 		quickpick.dispose();
@@ -102,8 +99,13 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 		if (repo) {
 			try {
 				quickpick.busy = true;
-				await octokit.repos.get({ owner, repo: repo });
-				quickpick.items = [{ label: `$(error) GitHub repository already exists`, description: `$(github) ${owner}/${repo}`, alwaysShow: true }];
+				const fullName = `${owner}/${repo}`;
+				const result = await client.repositories.get({ owner, repo });
+				if (result.full_name.toLowerCase() !== fullName.toLowerCase()) {
+					// Repository has moved permanently due to it being renamed
+					break;
+				}
+				quickpick.items = [{ label: `$(error) GitHub repository already exists`, description: `$(github) ${fullName}`, alwaysShow: true }];
 			} catch {
 				break;
 			} finally {
@@ -130,7 +132,7 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 
 		if (shouldGenerateGitignore) {
 			quickpick = vscode.window.createQuickPick();
-			quickpick.placeholder = localize('ignore', "Select which files should be included in the repository.");
+			quickpick.placeholder = vscode.l10n.t('Select which files should be included in the repository.');
 			quickpick.canSelectMany = true;
 			quickpick.show();
 
@@ -171,29 +173,27 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 	const githubRepository = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, cancellable: false, title: 'Publish to GitHub' }, async progress => {
 		progress.report({
 			message: isPrivate
-				? localize('publishing_private', "Publishing to a private GitHub repository")
-				: localize('publishing_public', "Publishing to a public GitHub repository"),
+				? vscode.l10n.t('Publishing to a private GitHub repository')
+				: vscode.l10n.t('Publishing to a public GitHub repository'),
 			increment: 25
 		});
 
-		type CreateRepositoryResponseData = Awaited<ReturnType<typeof octokit.repos.createForAuthenticatedUser>>['data'];
-		let createdGithubRepository: CreateRepositoryResponseData | undefined = undefined;
+		let createdGithubRepository: GitHubRepository | undefined = undefined;
 
 		if (isInCodespaces()) {
-			createdGithubRepository = await vscode.commands.executeCommand<CreateRepositoryResponseData>('github.codespaces.publish', { name: repo!, isPrivate });
+			createdGithubRepository = await vscode.commands.executeCommand<GitHubRepository>('github.codespaces.publish', { name: repo!, isPrivate });
 		} else {
-			const res = await octokit.repos.createForAuthenticatedUser({
+			createdGithubRepository = await client.repositories.create({
 				name: repo!,
 				private: isPrivate
 			});
-			createdGithubRepository = res.data;
 		}
 
 		if (createdGithubRepository) {
-			progress.report({ message: localize('publishing_firstcommit', "Creating first commit"), increment: 25 });
+			progress.report({ message: vscode.l10n.t('Creating first commit'), increment: 25 });
 
 			if (!repository) {
-				repository = await gitAPI.init(folder) || undefined;
+				repository = await gitAPI.init(folder, { defaultBranch: createdGithubRepository.default_branch }) || undefined;
 
 				if (!repository) {
 					return;
@@ -202,7 +202,7 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 				await repository.commit('first commit', { all: true, postCommitCommand: null });
 			}
 
-			progress.report({ message: localize('publishing_uploading', "Uploading files"), increment: 25 });
+			progress.report({ message: vscode.l10n.t('Uploading files'), increment: 25 });
 
 			const branch = await repository.getBranch('HEAD');
 			const protocol = vscode.workspace.getConfiguration('github').get<'https' | 'ssh'>('gitProtocol');
@@ -218,8 +218,8 @@ export async function publishRepository(gitAPI: GitAPI, repository?: Repository)
 		return;
 	}
 
-	const openOnGitHub = localize('openingithub', "Open on GitHub");
-	vscode.window.showInformationMessage(localize('publishing_done', "Successfully published the '{0}' repository to GitHub.", `${owner}/${repo}`), openOnGitHub).then(action => {
+	const openOnGitHub = vscode.l10n.t('Open on GitHub');
+	vscode.window.showInformationMessage(vscode.l10n.t('Successfully published the "{0}" repository to GitHub.', `${owner}/${repo}`), openOnGitHub).then(action => {
 		if (action === openOnGitHub) {
 			vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(githubRepository.html_url));
 		}

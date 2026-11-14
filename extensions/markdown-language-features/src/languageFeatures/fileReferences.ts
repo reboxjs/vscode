@@ -5,36 +5,34 @@
 
 import * as vscode from 'vscode';
 import type * as lsp from 'vscode-languageserver-types';
-import * as nls from 'vscode-nls';
 import { MdLanguageClient } from '../client/client';
 import { Command, CommandManager } from '../commandManager';
-
-const localize = nls.loadMessageBundle();
 
 
 export class FindFileReferencesCommand implements Command {
 
 	public readonly id = 'markdown.findAllFileReferences';
 
+	readonly #client: MdLanguageClient;
+
 	constructor(
-		private readonly client: MdLanguageClient,
-	) { }
+		client: MdLanguageClient,
+	) {
+		this.#client = client;
+	}
 
 	public async execute(resource?: vscode.Uri) {
+		resource ??= vscode.window.activeTextEditor?.document.uri;
 		if (!resource) {
-			resource = vscode.window.activeTextEditor?.document.uri;
-		}
-
-		if (!resource) {
-			vscode.window.showErrorMessage(localize('error.noResource', "Find file references failed. No resource provided."));
+			vscode.window.showErrorMessage(vscode.l10n.t("Find file references failed. No resource provided."));
 			return;
 		}
 
 		await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Window,
-			title: localize('progress.title', "Finding file references")
+			title: vscode.l10n.t("Finding file references")
 		}, async (_progress, token) => {
-			const locations = (await this.client.getReferencesToFileInWorkspace(resource!, token)).map(loc => {
+			const locations = (await this.#client.getReferencesToFileInWorkspace(resource, token)).map(loc => {
 				return new vscode.Location(vscode.Uri.parse(loc.uri), convertRange(loc.range));
 			});
 

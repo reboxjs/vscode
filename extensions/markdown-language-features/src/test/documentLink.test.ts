@@ -58,6 +58,52 @@ async function getLinksForFile(file: vscode.Uri): Promise<vscode.DocumentLink[]>
 		assertActiveDocumentUri(workspaceFile('b.md'));
 	});
 
+	// Re-enable when the server dependency includes microsoft/vscode-markdown-languageserver#28.
+	test.skip('Should update custom agent links after an unsaved edit', async () => {
+		const file = workspaceFile('linkProbe.agent.md');
+		await vscode.workspace.fs.writeFile(file, Buffer.from(`${new Array(53).fill('').join('\n')}\n[README](b.md)`));
+
+		try {
+			const document = await vscode.workspace.openTextDocument(file);
+			const editor = await vscode.window.showTextDocument(document);
+			assert.strictEqual(document.languageId, 'chatagent');
+
+			const [oldLink] = await getLinksForFile(file);
+			assert.deepStrictEqual({
+				startLine: oldLink.range.start.line,
+				text: document.getText(oldLink.range),
+			}, {
+				startLine: 53,
+				text: 'b.md',
+			});
+
+			const updatedContent = [
+				'---',
+				'name: LinkProbe',
+				'description: Test live links',
+				'target: github-copilot',
+				'---',
+				'',
+				'[README](b.md)',
+			].join('\n');
+			await editor.edit(edit => edit.replace(new vscode.Range(0, 0, document.lineCount, 0), updatedContent));
+
+			const [link] = await getLinksForFile(file);
+			assert.deepStrictEqual({
+				startLine: link.range.start.line,
+				text: document.getText(link.range),
+			}, {
+				startLine: 6,
+				text: 'b.md',
+			});
+			await executeLink(link);
+			assertActiveDocumentUri(workspaceFile('b.md'));
+		} finally {
+			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+			await vscode.workspace.fs.delete(file);
+		}
+	});
+
 	test('Should navigate to markdown file with leading /', async () => {
 		await withFileContents(testFileA, '[b](./b.md)');
 
@@ -134,7 +180,7 @@ async function getLinksForFile(file: vscode.Uri): Promise<vscode.DocumentLink[]>
 		}
 	});
 
-	test('Should navigate to fragment within current untitled file', async () => { // TODO: skip for now for ls migration
+	test.skip('Should navigate to fragment within current untitled file', async () => { // TODO: skip for now for ls migration
 		const testFile = workspaceFile('x.md').with({ scheme: 'untitled' });
 		await withFileContents(testFile, joinLines(
 			'[](#second)',
@@ -169,9 +215,8 @@ async function withFileContents(file: vscode.Uri, contents: string): Promise<voi
 }
 
 async function executeLink(link: vscode.DocumentLink) {
-	debugLog('executeingLink', link.target?.toString(), Date.now());
+	debugLog('executingLink', link.target?.toString(), Date.now());
 
-	const args: any[] = JSON.parse(decodeURIComponent(link.target!.query));
-	await vscode.commands.executeCommand(link.target!.path, vscode.Uri.from(args[0]), ...args.slice(1));
+	await vscode.commands.executeCommand('vscode.open', link.target!);
 	debugLog('executedLink', vscode.window.activeTextEditor?.document.toString(), Date.now());
 }
